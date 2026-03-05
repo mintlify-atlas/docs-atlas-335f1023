@@ -1,0 +1,294 @@
+---
+title: "ID Card Login"
+description: "Authenticate using college ID card OCR verification"
+---
+
+## Endpoint
+
+```http
+POST /api/auth/image-login
+```
+
+## Overview
+
+This endpoint uses Optical Character Recognition (OCR) to extract student information from a college ID card photo. It processes the image to extract the enrollment number and name, then generates a user ID in the college email format.
+
+<Note>
+  This is an alternative authentication method that doesn't require a pre-existing account. The system extracts credentials directly from the ID card.
+</Note>
+
+## Request
+
+### Content Type
+
+```
+multipart/form-data
+```
+
+### Request Body
+
+<ParamField body="image" type="file" required>
+  College ID card image file
+  
+  **Supported formats:** JPG, PNG, JPEG
+  
+  **Requirements:**
+  - Clear, well-lit photo of the ID card
+  - Enrollment number must be visible (11-digit number)
+  - Name field must be readable
+  - Text should not be blurred or obscured
+</ParamField>
+
+## Response
+
+<ResponseField name="status" type="string">
+  Either `"success"` or `"error"`
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Description of the operation result
+</ResponseField>
+
+<ResponseField name="user_id" type="string">
+  Generated user ID in college email format
+  
+  Format: `<firstname>.<lastname><first3digits>@adgitmdelhi.ac.in`
+  
+  Example: `john.doe123@adgitmdelhi.ac.in`
+</ResponseField>
+
+<ResponseField name="enrollment_no" type="string">
+  Extracted 11-digit enrollment number from the ID card
+</ResponseField>
+
+## Example Request
+
+```bash cURL
+curl -X POST http://localhost:3001/api/auth/image-login \
+  -F "image=@/path/to/id-card.jpg"
+```
+
+```javascript JavaScript with FormData
+const formData = new FormData();
+formData.append('image', idCardFile); // File object from input
+
+const response = await fetch('http://localhost:3001/api/auth/image-login', {
+  method: 'POST',
+  body: formData
+});
+
+const data = await response.json();
+console.log('Generated User ID:', data.user_id);
+```
+
+```javascript React Example
+function IdCardUpload() {
+  const handleUpload = async (e) => {
+    const file = e.target.files[0];
+    const formData = new FormData();
+    formData.append('image', file);
+
+    try {
+      const response = await fetch('/api/auth/image-login', {
+        method: 'POST',
+        body: formData
+      });
+      
+      const data = await response.json();
+      
+      if (data.status === 'success') {
+        console.log('User ID:', data.user_id);
+        console.log('Enrollment:', data.enrollment_no);
+        // Use the generated user_id for subsequent signup/login
+      }
+    } catch (error) {
+      console.error('OCR failed:', error);
+    }
+  };
+
+  return (
+    <input 
+      type="file" 
+      accept="image/*" 
+      onChange={handleUpload} 
+    />
+  );
+}
+```
+
+## Example Responses
+
+### Success Response
+
+```json 200 OK
+{
+  "status": "success",
+  "message": "OCR verification successful",
+  "user_id": "sagar.kumar123@adgitmdelhi.ac.in",
+  "enrollment_no": "12345678901"
+}
+```
+
+## Error Responses
+
+### No Image Uploaded
+
+```json 400 Bad Request
+{
+  "status": "error",
+  "message": "No image uploaded."
+}
+```
+
+### Enrollment Number Not Found
+
+```json 400 Bad Request
+{
+  "status": "error",
+  "message": "Enrollment number not found in the ID card."
+}
+```
+
+### Name Not Readable
+
+```json 400 Bad Request
+{
+  "status": "error",
+  "message": "Name not found or unreadable on the ID card."
+}
+```
+
+### OCR Processing Failed
+
+```json 500 Internal Server Error
+{
+  "status": "error",
+  "message": "OCR failed to process image."
+}
+```
+
+## How It Works
+
+<Steps>
+  <Step title="Image Upload">
+    Client uploads ID card image via multipart/form-data
+  </Step>
+  
+  <Step title="OCR Processing">
+    Server uses Tesseract.js to extract text from the image
+    
+    ```javascript server.js
+    const result = await Tesseract.recognize(imagePath, 'eng');
+    const extractedText = result.data.text;
+    ```
+  </Step>
+  
+  <Step title="Enrollment Number Extraction">
+    System searches for an 11-digit number in the extracted text
+    
+    ```javascript
+    const enrollmentMatch = extractedText.match(/\b\d{11}\b/);
+    const enrollmentNo = enrollmentMatch?.[0];
+    ```
+  </Step>
+  
+  <Step title="Name Extraction">
+    System extracts the name from the "Name:" field
+    
+    ```javascript
+    const nameMatch = extractedText.match(/Name\s*:\s*(.*)/i);
+    let name = nameMatch?.[1]?.trim()
+      .split(' ')
+      .slice(0, 2)  // Take first two words
+      .join('.')
+      .toLowerCase();
+    ```
+  </Step>
+  
+  <Step title="User ID Generation">
+    Combines name and first 3 digits of enrollment number
+    
+    Format: `<firstname>.<lastname><digits>@adgitmdelhi.ac.in`
+    
+    Example: `sagar.kumar123@adgitmdelhi.ac.in`
+  </Step>
+</Steps>
+
+## Best Practices
+
+<Warning>
+  This endpoint returns a user ID but does NOT create an account or return a JWT token. You must use the generated `user_id` with the [Signup](/api/auth/signup) endpoint to create an account.
+</Warning>
+
+### Image Quality Tips
+
+- **Lighting**: Ensure good lighting without glare or shadows
+- **Focus**: Image should be clear and in focus
+- **Orientation**: ID card should be right-side up
+- **Background**: Plain background improves OCR accuracy
+- **Resolution**: Higher resolution improves text recognition
+
+### Integration Flow
+
+```javascript Complete Authentication Flow
+// 1. Upload ID card for OCR
+const ocrResponse = await fetch('/api/auth/image-login', {
+  method: 'POST',
+  body: formData
+});
+const { user_id, enrollment_no } = await ocrResponse.json();
+
+// 2. Use extracted user_id to create account
+const signupResponse = await fetch('/api/auth/signup', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    email: user_id,
+    password: userPassword
+  })
+});
+
+// 3. Login with the new account
+const loginResponse = await fetch('/api/auth/login', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    email: user_id,
+    password: userPassword
+  })
+});
+
+const { token } = await loginResponse.json();
+// Now you have a JWT token for authenticated requests
+```
+
+## Technical Details
+
+### OCR Engine
+
+- **Library**: Tesseract.js v6.0.1
+- **Language**: English (`eng`)
+- **Training Data**: Located at `backend/eng.traineddata`
+
+### File Handling
+
+- Uploaded images are temporarily stored in `backend/uploads/`
+- Files are deleted after processing (success or failure)
+- Uses `multer` middleware for multipart form handling
+
+## Security Considerations
+
+<Info>
+  Uploaded images are immediately deleted after OCR processing to prevent storage of sensitive ID card information.
+</Info>
+
+- Images are not permanently stored
+- No authentication token is generated by this endpoint
+- Rate limiting recommended to prevent abuse
+- Validate file types on client side before upload
+
+## Related Endpoints
+
+- [Signup](/api/auth/signup) - Create account using extracted user ID
+- [Login](/api/auth/login) - Login with created credentials
+- [Google Login](/api/auth/google-login) - Alternative OAuth authentication

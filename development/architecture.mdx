@@ -9,7 +9,7 @@ MeetMates is a college-exclusive video chat platform built with a modern, full-s
 
 ## High-Level Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────┐
 │                         Client Layer                            │
 │  ┌────────────────────────────────────────────────────────┐    │
@@ -115,7 +115,7 @@ MeetMates is a college-exclusive video chat platform built with a modern, full-s
 
 ### Backend Structure
 
-```
+```text
 backend/
 ├── server.js              # Main server file - Express + Socket.IO setup
 ├── package.json           # Dependencies and scripts
@@ -136,7 +136,7 @@ backend/
 
 ### Frontend Structure
 
-```
+```text
 frontend/
 ├── index.html            # HTML entry point
 ├── package.json          # Dependencies and scripts
@@ -267,7 +267,7 @@ WebRTC enables peer-to-peer video/audio streaming between matched users.
 
 **Signaling Flow:**
 
-```
+```text
 User A                    Server                    User B
   │                         │                         │
   ├─ chatStart ────────────►│◄────────── chatStart ──┤

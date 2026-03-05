@@ -1,0 +1,153 @@
+---
+title: "Get Profile"
+description: "Retrieve authenticated user's profile information"
+---
+
+## Endpoint
+
+```http
+GET /api/profile
+```
+
+## Authentication
+
+This endpoint requires authentication. Include a valid JWT token in the request headers.
+
+## Request Headers
+
+<ParamField header="Authorization" type="string" required>
+  Bearer token obtained from login or Google authentication
+  
+  Format: `Bearer <token>`
+</ParamField>
+
+**Alternative:**
+
+<ParamField header="x-auth-token" type="string" required>
+  JWT token (without "Bearer" prefix)
+</ParamField>
+
+## Response
+
+<ResponseField name="success" type="boolean">
+  Always `true` for successful requests
+</ResponseField>
+
+<ResponseField name="user" type="object">
+  User profile information
+  
+  <Expandable title="user properties">
+    <ResponseField name="id" type="string">
+      MongoDB ObjectId of the user
+    </ResponseField>
+    
+    <ResponseField name="email" type="string">
+      User's email address
+    </ResponseField>
+    
+    <ResponseField name="name" type="string">
+      User's display name (if provided)
+    </ResponseField>
+    
+    <ResponseField name="profilePicture" type="string">
+      URL to user's profile picture (for Google OAuth users)
+    </ResponseField>
+    
+    <ResponseField name="isGoogleUser" type="boolean">
+      Whether the user signed up via Google OAuth
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Example Request
+
+```bash cURL
+curl -X GET http://localhost:3001/api/profile \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+```javascript JavaScript
+const response = await fetch('http://localhost:3001/api/profile', {
+  method: 'GET',
+  headers: {
+    'Authorization': `Bearer ${token}`
+  }
+});
+
+const data = await response.json();
+console.log(data.user);
+```
+
+## Example Response
+
+### Success Response
+
+```json 200 OK
+{
+  "success": true,
+  "user": {
+    "id": "507f1f77bcf86cd799439011",
+    "email": "student@adgitmdelhi.ac.in",
+    "name": "John Doe",
+    "profilePicture": "https://lh3.googleusercontent.com/a/...",
+    "isGoogleUser": true
+  }
+}
+```
+
+## Error Responses
+
+### Missing Token
+
+```json 401 Unauthorized
+{
+  "error": "No token provided"
+}
+```
+
+### Invalid Token
+
+```json 401 Unauthorized
+{
+  "error": "Invalid token"
+}
+```
+
+### Expired Token
+
+```json 401 Unauthorized
+{
+  "error": "Token expired"
+}
+```
+
+### User Not Found
+
+```json 404 Not Found
+{
+  "error": "User not found"
+}
+```
+
+## Use Cases
+
+- **Profile Display**: Fetch user information to display in the UI
+- **Session Validation**: Verify user is still authenticated
+- **User Context**: Get user details for personalized features
+- **Account Settings**: Pre-populate forms with current user data
+
+## Notes
+
+<Note>
+  This endpoint uses the same authentication middleware as `/api/verify-token` but returns more detailed user information including profile picture and OAuth status.
+</Note>
+
+<Tip>
+  Cache the profile response on the client side to avoid repeated API calls. Refresh when the user updates their profile or after re-authentication.
+</Tip>
+
+## Related Endpoints
+
+- [Verify Token](/api/auth/verify-token) - Validate token without full profile data
+- [Google Login](/api/auth/google-login) - Initial authentication that returns user profile
+- [Login](/api/auth/login) - Standard login that returns JWT token
