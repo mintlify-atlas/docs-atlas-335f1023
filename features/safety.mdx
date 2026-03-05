@@ -1,0 +1,640 @@
+---
+title: 'Safety & Moderation'
+description: 'Safety features, user reporting, blocking capabilities, and moderation tools'
+---
+
+## Overview
+
+While MeetMates currently implements basic safety features through the "Next" functionality and connection controls, this page outlines the safety architecture and planned moderation capabilities.
+
+<Warning>
+Full reporting and blocking features are **not yet implemented** in the current codebase. This documentation serves as a design specification for future development.
+</Warning>
+
+## Current Safety Features
+
+### Immediate Disconnect ("Next" Button)
+
+Users can instantly disconnect from uncomfortable conversations:
+
+```javascript App.jsx:168-179
+const handleNextChat = () => {
+  // Clear current chat state
+  setMessages([]);
+  setCurrentPartnerId(null);
+  setIsVideoChat(false);
+  
+  // Emit next event to server
+  socket.emit("next");
+  
+  // Set to waiting state
+  setCurrentScreen("waiting");
+};
+```
+
+<Info>
+The "Next" feature provides immediate escape from unwanted interactions without requiring account creation or reporting.
+</Info>
+
+### Media Control Privacy
+
+Users maintain full control over their camera and microphone:
+
+```javascript VideoChat.jsx:310-328
+const toggleMute = () => {
+  if (localStreamRef.current) {
+    const audioTracks = localStreamRef.current.getAudioTracks();
+    audioTracks.forEach((track) => {
+      track.enabled = !track.enabled;
+    });
+    setIsMuted(!isMuted);
+  }
+};
+
+const toggleCamera = () => {
+  if (localStreamRef.current) {
+    const videoTracks = localStreamRef.current.getVideoTracks();
+    videoTracks.forEach((track) => {
+      track.enabled = !track.enabled;
+    });
+    setIsCameraOff(!isCameraOff);
+  }
+};
+```
+
+### Connection State Transparency
+
+Users can see their partner's connection status:
+
+```javascript VideoChat.jsx:348-352
+<div className="video-label">
+  Partner {isConnected ? "" : "(Connecting...)"}
+</div>
+```
+
+## Planned Safety Architecture
+
+### User Reporting System
+
+<Steps>
+  <Step title="Report Initiation">
+    User clicks "Report" button during active chat session
+  </Step>
+  <Step title="Reason Selection">
+    User selects report category (harassment, inappropriate content, spam, etc.)
+  </Step>
+  <Step title="Evidence Capture">
+    System captures:
+    - Last 10 messages from chat
+    - Timestamp and user IDs
+    - Video preference setting
+    - Reporter's account info
+  </Step>
+  <Step title="Immediate Action">
+    Reported user is added to reporter's block list
+  </Step>
+  <Step title="Moderation Queue">
+    Report enters review queue for admin action
+  </Step>
+</Steps>
+
+### Proposed Data Model
+
+```javascript models/Report.js (Proposed)
+const reportSchema = new mongoose.Schema({
+  reporterId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
+  reportedUserId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
+  reportedSocketId: {
+    type: String,
+    required: true
+  },
+  reason: {
+    type: String,
+    enum: ['harassment', 'inappropriate_content', 'spam', 'underage', 'other'],
+    required: true
+  },
+  description: {
+    type: String,
+    maxlength: 500
+  },
+  evidence: {
+    messages: [{
+      sender: String,
+      text: String,
+      timestamp: Date
+    }],
+    roomId: String,
+    hadVideo: Boolean
+  },
+  status: {
+    type: String,
+    enum: ['pending', 'reviewing', 'resolved', 'dismissed'],
+    default: 'pending'
+  },
+  moderatorNotes: String,
+  moderatorId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  resolvedAt: Date,
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
+});
+```
+
+### Report Submission Flow
+
+<CodeGroup>
+```javascript client/ReportModal.jsx (Proposed)
+const submitReport = async (reason, description) => {
+  try {
+    const token = localStorage.getItem('token');
+    const response = await fetch(`${API_URL}/api/reports`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        reportedSocketId: currentPartnerId,
+        reason,
+        description,
+        evidence: {
+          messages: recentMessages.slice(-10),
+          roomId: currentRoomId,
+          hadVideo: isVideoChat
+        }
+      })
+    });
+
+    if (response.ok) {
+      // Add to local block list
+      blockUser(currentPartnerId);
+      // Disconnect and find next partner
+      handleNextChat();
+      showNotification('Report submitted. User blocked.');
+    }
+  } catch (error) {
+    console.error('Report submission failed:', error);
+  }
+};
+```
+
+```javascript server/routes/reports.js (Proposed)
+router.post('/api/reports', authMiddleware, async (req, res) => {
+  try {
+    const { reportedSocketId, reason, description, evidence } = req.body;
+    
+    // Find reported user's database ID from socket ID
+    const reportedUser = await findUserBySocketId(reportedSocketId);
+    
+    if (!reportedUser) {
+      return res.status(404).json({ error: 'Reported user not found' });
+    }
+
+    const report = new Report({
+      reporterId: req.user._id,
+      reportedUserId: reportedUser._id,
+      reportedSocketId,
+      reason,
+      description,
+      evidence,
+      status: 'pending'
+    });
+
+    await report.save();
+
+    // Notify moderation team (webhook, email, etc.)
+    await notifyModerators(report);
+
+    res.status(201).json({ 
+      success: true, 
+      message: 'Report submitted successfully' 
+    });
+  } catch (error) {
+    console.error('Report creation error:', error);
+    res.status(500).json({ error: 'Failed to submit report' });
+  }
+});
+```
+</CodeGroup>
+
+## Blocking System
+
+### Block List Management
+
+```javascript models/User.js (Proposed Addition)
+blockedUsers: [{
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  blockedAt: {
+    type: Date,
+    default: Date.now
+  },
+  reason: String  // Optional: why they blocked this user
+}]
+```
+
+### Preventing Blocked User Matches
+
+```javascript server.js (Proposed Modification)
+function createChatPair(user1, user2, withVideo) {
+  const socket1 = io.sockets.sockets.get(user1);
+  const socket2 = io.sockets.sockets.get(user2);
+
+  if (!socket1 || !socket2) {
+    if (socket1) waitingUsers.push(user1);
+    if (socket2) waitingUsers.push(user2);
+    return;
+  }
+
+  // NEW: Check block lists
+  const user1Info = authenticatedUsers.get(user1);
+  const user2Info = authenticatedUsers.get(user2);
+  
+  if (user1Info && user2Info) {
+    const isBlocked = await checkBlockStatus(
+      user1Info.userId, 
+      user2Info.userId
+    );
+    
+    if (isBlocked) {
+      console.log('Blocked user pair detected, skipping match');
+      waitingUsers.push(user1);
+      waitingUsers.push(user2);
+      return;
+    }
+  }
+
+  // ... rest of existing createChatPair logic
+}
+```
+
+<Tip>
+Block checks should happen **before** creating the room to prevent any interaction between blocked users.
+</Tip>
+
+## Moderation Dashboard
+
+### Report Queue Interface
+
+```javascript admin/ReportQueue.jsx (Proposed)
+const ReportQueue = () => {
+  const [reports, setReports] = useState([]);
+  const [selectedReport, setSelectedReport] = useState(null);
+
+  useEffect(() => {
+    fetchPendingReports();
+  }, []);
+
+  const handleReportAction = async (reportId, action) => {
+    // action: 'warn_user', 'suspend_user', 'ban_user', 'dismiss'
+    await fetch(`/api/admin/reports/${reportId}/${action}`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${adminToken}` }
+    });
+    
+    fetchPendingReports(); // Refresh list
+  };
+
+  return (
+    <div className="report-queue">
+      <h2>Pending Reports ({reports.length})</h2>
+      {reports.map(report => (
+        <ReportCard 
+          key={report._id}
+          report={report}
+          onAction={handleReportAction}
+        />
+      ))}
+    </div>
+  );
+};
+```
+
+### Moderation Actions
+
+<Accordion title="Available Moderation Actions">
+
+**Warning**
+- Email notification to user
+- No functional restrictions
+- Tracked in user record
+
+**Temporary Suspension**
+- Account disabled for specified duration (1-30 days)
+- User cannot login during suspension
+- Automatic re-activation after period
+
+**Permanent Ban**
+- Account permanently disabled
+- Email blocked from new signups
+- IP logging for persistent offenders
+
+**Report Dismissal**
+- Mark report as invalid/spam
+- Track false reporting patterns
+
+</Accordion>
+
+### Admin Endpoints
+
+```javascript server/routes/admin.js (Proposed)
+router.post('/api/admin/reports/:reportId/warn', 
+  authMiddleware, 
+  adminOnly,
+  async (req, res) => {
+    const report = await Report.findById(req.params.reportId)
+      .populate('reportedUserId');
+    
+    // Send warning email
+    await sendWarningEmail(report.reportedUserId.email, report.reason);
+    
+    // Update report status
+    report.status = 'resolved';
+    report.moderatorId = req.user._id;
+    report.moderatorNotes = req.body.notes;
+    report.resolvedAt = new Date();
+    await report.save();
+    
+    // Add warning to user record
+    await User.findByIdAndUpdate(report.reportedUserId._id, {
+      $push: { warnings: { date: new Date(), reason: report.reason } }
+    });
+    
+    res.json({ success: true });
+  }
+);
+
+router.post('/api/admin/reports/:reportId/ban',
+  authMiddleware,
+  adminOnly,
+  async (req, res) => {
+    const report = await Report.findById(req.params.reportId);
+    
+    // Ban user
+    await User.findByIdAndUpdate(report.reportedUserId, {
+      isBanned: true,
+      bannedAt: new Date(),
+      banReason: report.reason
+    });
+    
+    // Disconnect all active sessions
+    disconnectUserSessions(report.reportedUserId);
+    
+    // Update report
+    report.status = 'resolved';
+    report.moderatorId = req.user._id;
+    report.resolvedAt = new Date();
+    await report.save();
+    
+    res.json({ success: true });
+  }
+);
+```
+
+## Automated Safety Measures
+
+### Content Filtering (Future)
+
+<CardGroup cols={2}>
+  <Card title="Text Message Scanning" icon="message">
+    Real-time profanity and harassment detection using pattern matching
+  </Card>
+  <Card title="Image Recognition" icon="image">
+    ML-based detection of inappropriate video content (future enhancement)
+  </Card>
+  <Card title="Rate Limiting" icon="gauge">
+    Limit rapid "Next" clicking to prevent harassment campaigns
+  </Card>
+  <Card title="Pattern Detection" icon="chart-line">
+    Identify users with high report rates for automatic review
+  </Card>
+</CardGroup>
+
+### Proposed Auto-Moderation Logic
+
+```javascript server/middleware/automod.js (Proposed)
+const autoModerateMessage = (message, userId) => {
+  // Check for blocked words/phrases
+  const hasProfanity = checkProfanity(message);
+  if (hasProfanity) {
+    logViolation(userId, 'profanity', message);
+    return { allowed: false, reason: 'profanity_detected' };
+  }
+  
+  // Check for spam patterns
+  const isSpam = checkSpamPatterns(message);
+  if (isSpam) {
+    logViolation(userId, 'spam', message);
+    return { allowed: false, reason: 'spam_detected' };
+  }
+  
+  // Check for URLs (optional restriction)
+  const hasURL = /https?:\/\//i.test(message);
+  if (hasURL) {
+    logViolation(userId, 'url_sharing', message);
+    // Optionally block or just log
+  }
+  
+  return { allowed: true };
+};
+```
+
+### Integration with Message Flow
+
+```javascript server.js (Proposed Modification)
+socket.on("sendMessage", (message) => {
+  if (chatPairs[socket.id]) {
+    const userInfo = authenticatedUsers.get(socket.id);
+    
+    // AUTO-MODERATION CHECK
+    const modResult = autoModerateMessage(message, socket.userId);
+    if (!modResult.allowed) {
+      socket.emit('message_blocked', { reason: modResult.reason });
+      return;
+    }
+    
+    // Message approved, broadcast
+    io.to(chatPairs[socket.id].room).emit("message", {
+      sender: socket.id,
+      text: message,
+      senderEmail: userInfo?.email || 'Anonymous',
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+```
+
+## Privacy & Data Retention
+
+### Data Collection Policy
+
+<AccordionGroup>
+  <Accordion title="What data is collected?">
+    - User account information (email, name, profile picture)
+    - Authentication tokens and login timestamps
+    - Socket connection metadata (socket ID, connection time)
+    - Chat messages (only last 10 for reports)
+    - Report submissions and moderation actions
+  </Accordion>
+  
+  <Accordion title="What is NOT stored?">
+    - Full chat transcripts (beyond report evidence)
+    - Video/audio streams (peer-to-peer, never touches server)
+    - IP addresses (unless ban evasion suspected)
+    - Device fingerprints
+  </Accordion>
+  
+  <Accordion title="Data retention periods">
+    - Active user accounts: Indefinite
+    - Deleted accounts: 30 days for recovery
+    - Report evidence: 90 days after resolution
+    - Ban records: Permanent
+    - Authentication logs: 30 days
+  </Accordion>
+</AccordionGroup>
+
+### GDPR Compliance
+
+```javascript server/routes/user.js (Proposed)
+// Right to access data
+router.get('/api/user/data-export', authMiddleware, async (req, res) => {
+  const userData = await User.findById(req.user._id).lean();
+  const reports = await Report.find({ 
+    $or: [{ reporterId: req.user._id }, { reportedUserId: req.user._id }]
+  });
+  
+  res.json({
+    account: userData,
+    reports: reports,
+    exportedAt: new Date()
+  });
+});
+
+// Right to deletion
+router.delete('/api/user/account', authMiddleware, async (req, res) => {
+  await User.findByIdAndUpdate(req.user._id, {
+    isDeleted: true,
+    deletedAt: new Date(),
+    email: `deleted_${req.user._id}@deleted.com` // Anonymize
+  });
+  
+  // Schedule permanent deletion after 30 days
+  scheduleAccountPurge(req.user._id, 30);
+  
+  res.json({ message: 'Account deletion initiated' });
+});
+```
+
+## Safety Recommendations
+
+<Warning>
+**For Users:**
+- Never share personal information (full name, address, phone number)
+- Use the "Next" button immediately if uncomfortable
+- Report serious violations (harassment, illegal content)
+- Keep video chat in public spaces if possible
+- Parents should supervise minors using the platform
+</Warning>
+
+<Tip>
+**For Administrators:**
+- Review reports within 24 hours
+- Maintain detailed moderation logs
+- Implement graduated enforcement (warn → suspend → ban)
+- Regularly audit auto-moderation rules
+- Provide transparency reports quarterly
+</Tip>
+
+## Implementation Roadmap
+
+<Steps>
+  <Step title="Phase 1: Basic Reporting" timeline="2-3 weeks">
+    - Add report button to chat interface
+    - Implement Report model and API endpoints
+    - Create basic moderation queue
+    - Add block list functionality
+  </Step>
+  
+  <Step title="Phase 2: Moderation Dashboard" timeline="3-4 weeks">
+    - Build admin authentication system
+    - Create report review interface
+    - Implement moderation actions (warn/suspend/ban)
+    - Add email notification system
+  </Step>
+  
+  <Step title="Phase 3: Automated Safety" timeline="4-6 weeks">
+    - Implement profanity filtering
+    - Add spam detection
+    - Create pattern analysis for repeat offenders
+    - Build automated warning system
+  </Step>
+  
+  <Step title="Phase 4: Advanced Features" timeline="2-3 months">
+    - ML-based content moderation
+    - User reputation system
+    - Appeal process for bans
+    - Transparency reports
+  </Step>
+</Steps>
+
+## Testing Safety Features
+
+```javascript tests/safety.test.js (Proposed)
+describe('Safety Features', () => {
+  test('User can block another user', async () => {
+    const blocker = await createTestUser();
+    const blocked = await createTestUser();
+    
+    await blockUser(blocker._id, blocked._id);
+    
+    const canMatch = await checkBlockStatus(blocker._id, blocked._id);
+    expect(canMatch).toBe(false);
+  });
+  
+  test('Blocked users cannot be matched', async () => {
+    const user1 = await createTestUser();
+    const user2 = await createTestUser();
+    
+    await blockUser(user1._id, user2._id);
+    
+    const match = await attemptMatch(user1.socketId, user2.socketId);
+    expect(match).toBeNull();
+  });
+  
+  test('Report creates database record', async () => {
+    const reporter = await createAuthenticatedUser();
+    const reported = await createTestUser();
+    
+    const response = await submitReport({
+      reporterId: reporter._id,
+      reportedUserId: reported._id,
+      reason: 'harassment',
+      description: 'Inappropriate messages'
+    });
+    
+    expect(response.status).toBe(201);
+    
+    const report = await Report.findOne({ reporterId: reporter._id });
+    expect(report).toBeDefined();
+    expect(report.status).toBe('pending');
+  });
+});
+```
+
+<Info>
+Safety features should be tested thoroughly before deployment, including edge cases like simultaneous blocks and mass reporting.
+</Info>

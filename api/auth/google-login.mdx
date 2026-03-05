@@ -1,0 +1,150 @@
+---
+title: "Google Login"
+api: "POST /api/auth/google-login"
+description: "Authenticate or create a user account using Google OAuth credentials"
+---
+
+This endpoint handles both login and signup for users authenticating with Google. If the user doesn't exist, a new account is automatically created. If the user exists, they are logged in.
+
+## Request Body
+
+<ParamField body="credential" type="string" required>
+  The Google ID token credential obtained from Google Sign-In
+</ParamField>
+
+<ParamField body="withVideo" type="boolean" default="true">
+  Whether the user wants to enable video in meetings. Defaults to true
+</ParamField>
+
+## Request Example
+
+```bash
+curl -X POST https://api.meetmates.com/api/auth/google-login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "credential": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjE5ZmUyYT...",
+    "withVideo": true
+  }'
+```
+
+```json
+{
+  "credential": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjE5ZmUyYT...",
+  "withVideo": true
+}
+```
+
+## Response
+
+<ResponseField name="success" type="boolean">
+  Indicates if the authentication was successful
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Success message indicating whether it was a login or signup
+  - "Google signup successful" - New user account created
+  - "Google login successful" - Existing user logged in
+</ResponseField>
+
+<ResponseField name="token" type="string">
+  JWT authentication token valid for 7 days. Include this in the Authorization header for protected endpoints
+</ResponseField>
+
+<ResponseField name="user" type="object">
+  User information object
+  <Expandable title="properties">
+    <ResponseField name="id" type="string">
+      Unique user identifier (MongoDB ObjectId)
+    </ResponseField>
+    <ResponseField name="email" type="string">
+      User's email address from Google account
+    </ResponseField>
+    <ResponseField name="name" type="string">
+      User's display name from Google account
+    </ResponseField>
+    <ResponseField name="profilePicture" type="string">
+      URL to user's Google profile picture
+    </ResponseField>
+    <ResponseField name="isGoogleUser" type="boolean">
+      Always true for Google authentication
+    </ResponseField>
+    <ResponseField name="withVideo" type="boolean">
+      Whether video is enabled for the user
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Response Example
+
+```json
+{
+  "success": true,
+  "message": "Google login successful",
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "user": {
+    "id": "507f1f77bcf86cd799439011",
+    "email": "john.doe@gmail.com",
+    "name": "John Doe",
+    "profilePicture": "https://lh3.googleusercontent.com/a/...",
+    "isGoogleUser": true,
+    "withVideo": true
+  }
+}
+```
+
+## Error Responses
+
+<ResponseField name="error" type="string">
+  Error message describing what went wrong
+</ResponseField>
+
+<ResponseField name="details" type="string" optional>
+  Additional error details (only in development mode)
+</ResponseField>
+
+### Error Codes
+
+<ResponseExample>
+```json 400 - Missing Credential
+{
+  "error": "Google credential is required"
+}
+```
+
+```json 400 - No Email
+{
+  "error": "Email not provided by Google"
+}
+```
+
+```json 400 - Invalid Token Timing
+{
+  "error": "Invalid token timing. Please try again."
+}
+```
+
+```json 400 - Invalid Token
+{
+  "error": "Invalid Google token. Please try again."
+}
+```
+
+```json 500 - Server Error
+{
+  "error": "Google authentication failed",
+  "details": "Token verification failed"
+}
+```
+</ResponseExample>
+
+## Authentication
+
+This endpoint does not require authentication. It is used to obtain the authentication token.
+
+## Notes
+
+- The Google credential must be a valid ID token from Google Sign-In
+- Google users are automatically marked as verified (`isVerified: true`)
+- If a user already exists with the same email, their account is updated with Google information
+- The JWT token expires after 7 days
+- Users created via Google auth don't have a password set

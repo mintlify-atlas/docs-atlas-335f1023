@@ -1,80 +1,190 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get MeetMates running locally in under 10 minutes
 ---
 
-## Get started in three steps
+## Prerequisites
 
-Get your documentation site running locally and make your first customization.
+Before you begin, ensure you have:
 
-### Step 1: Set up your local environment
+- Node.js 16.x or higher
+- MongoDB (local or Atlas account)
+- Google Cloud Console account (for OAuth)
+- Git
+
+## Setup Steps
+
+<Steps>
+  <Step title="Clone the Repository">
+    Clone MeetMates and navigate to the project directory:
+
+    ```bash Terminal
+    git clone https://github.com/divyanshraj0408/meetmates.git
+    cd meetmates
+    ```
+  </Step>
+
+  <Step title="Install Dependencies">
+    Install dependencies for both frontend and backend:
+
+    ```bash Terminal
+    # Install backend dependencies
+    cd backend
+    npm install
+
+    # Install frontend dependencies
+    cd ../frontend
+    npm install
+    ```
+  </Step>
+
+  <Step title="Set Up Google OAuth">
+    1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+    2. Create a new project or select an existing one
+    3. Enable the **Google+ API**
+    4. Navigate to **Credentials** → **Create Credentials** → **OAuth client ID**
+    5. Configure the OAuth consent screen
+    6. Set **Authorized JavaScript origins**: `http://localhost:5173`
+    7. Set **Authorized redirect URIs**: `http://localhost:5173`
+    8. Copy your **Client ID** for the next step
+
+    <Note>
+      Save your Google Client ID - you'll need it for environment configuration.
+    </Note>
+  </Step>
+
+  <Step title="Configure Environment Variables">
+    Create `.env` files in both backend and frontend directories:
+
+    **Backend** (`backend/.env`):
+    ```env
+    MONGODB_URI=mongodb://localhost:27017/meetmates
+    JWT_SECRET=your-super-secret-jwt-key-change-this
+    CORS_ORIGIN=http://localhost:5173
+    PORT=3001
+    GOOGLE_CLIENT_ID=your-google-client-id-from-step-3
+    ```
+
+    **Frontend** (`frontend/.env`):
+    ```env
+    VITE_BACKEND_URL=http://localhost:3001
+    VITE_GOOGLE_CLIENT_ID=your-google-client-id-from-step-3
+    ```
+
+    <Warning>
+      Never commit your `.env` files to version control. They contain sensitive credentials.
+    </Warning>
+  </Step>
+
+  <Step title="Start MongoDB">
+    If you're running MongoDB locally:
+
+    ```bash Terminal
+    # macOS (with Homebrew)
+    brew services start mongodb-community
+
+    # Linux
+    sudo systemctl start mongod
+
+    # Windows
+    net start MongoDB
+    ```
+
+    Alternatively, use [MongoDB Atlas](https://www.mongodb.com/cloud/atlas) and update your `MONGODB_URI` accordingly.
+  </Step>
+
+  <Step title="Start the Backend Server">
+    In the `backend` directory:
+
+    ```bash Terminal
+    npm start
+    ```
+
+    You should see:
+    ```
+    Server running on port 3001
+    MongoDB connected
+    ```
+  </Step>
+
+  <Step title="Start the Frontend">
+    In a new terminal, navigate to the `frontend` directory:
+
+    ```bash Terminal
+    npm run dev
+    ```
+
+    Your application will be available at `http://localhost:5173`
+  </Step>
+</Steps>
+
+## Verify Your Setup
+
+1. **Frontend**: Open `http://localhost:5173` - you should see the MeetMates landing page
+2. **Backend**: Check `http://localhost:3001` - the server should be running
+3. **Database**: Verify MongoDB is connected (check backend console output)
+
+## Test the Application
 
 <AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
+  <Accordion title="Sign in with Google">
+    1. Click the **Sign in with Google** button
+    2. Select your Google account
+    3. Grant the requested permissions
+    4. You should be redirected to the main chat interface
   </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
+
+  <Accordion title="Start a video chat">
+    1. After signing in, click **Start Chat**
+    2. Enable camera and microphone permissions
+    3. You'll enter the waiting room
+    4. Open a second browser window (or incognito tab) and repeat
+    5. Both users should be matched and connected
   </Accordion>
 </AccordionGroup>
 
-### Step 2: Deploy your changes
+## Common Issues
 
 <AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+  <Accordion title="CORS Errors">
+    If you see CORS errors in the browser console:
+    - Verify `CORS_ORIGIN` in `backend/.env` matches your frontend URL
+    - Restart the backend server after changing environment variables
+  </Accordion>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+  <Accordion title="Socket.IO Connection Failed">
+    If Socket.IO connection fails:
+    - Check that `VITE_BACKEND_URL` in `frontend/.env` is correct
+    - Verify the backend server is running on port 3001
+    - Check for firewall blocking WebSocket connections
+  </Accordion>
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
+  <Accordion title="MongoDB Connection Error">
+    If MongoDB fails to connect:
+    - Verify MongoDB is running: `mongosh` (should connect successfully)
+    - Check `MONGODB_URI` format in `backend/.env`
+    - For Atlas: verify IP address is whitelisted
+  </Accordion>
+
+  <Accordion title="Google OAuth Not Working">
+    If Google sign-in fails:
+    - Verify `GOOGLE_CLIENT_ID` matches in both `.env` files
+    - Check authorized JavaScript origins in Google Cloud Console
+    - Ensure OAuth consent screen is published (not in testing mode with restricted users)
   </Accordion>
 </AccordionGroup>
 
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
+## Next Steps
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Installation Details" icon="book" href="/installation">
+    Learn more about detailed installation and configuration options
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/auth/google-login">
+    Explore the backend API endpoints and Socket.IO events
+  </Card>
 </CardGroup>
 
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>
+<Tip>
+  For testing with multiple users locally, open multiple browser windows or use incognito mode with different Google accounts.
+</Tip>

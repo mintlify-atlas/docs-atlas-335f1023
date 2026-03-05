@@ -1,0 +1,694 @@
+---
+title: "WebRTC Signaling"
+description: "WebRTC connection setup, offer/answer exchange, and ICE candidate handling"
+---
+
+## Overview
+
+MeetMates uses Socket.IO for WebRTC signaling to establish peer-to-peer video connections. The server acts as a signaling channel, relaying WebRTC offers, answers, and ICE candidates between matched users.
+
+## WebRTC Connection Flow
+
+```
+User A (Initiator)         Server              User B (Receiver)
+      |                       |                        |
+      |---ready-to-connect--->|<---ready-to-connect----|
+      |                       |                        |
+      |                [Both ready, A initiates]        |
+      |<---create-offer-------|                        |
+      |                       |                        |
+      | [Create offer]        |                        |
+      |---webrtc-offer------->|-----webrtc-offer------>|
+      |                       |                        |
+      |                       |        [Create answer] |
+      |<---webrtc-answer------|<----webrtc-answer------|
+      |                       |                        |
+      |---ice-candidate------>|----ice-candidate------>|
+      |<---ice-candidate------|<----ice-candidate------|
+      |                       |                        |
+      | [Connection established over P2P]               |
+      |<===============================================>|
+```
+
+## Signaling Events
+
+### `ready-to-connect`
+
+**Direction:** Client → Server
+
+**Purpose:** Signal that the client is ready to establish a WebRTC connection
+
+**Payload:** None
+
+**When to emit:** After receiving `chatStart` event with `withVideo: true` and local media stream is ready
+
+**Client-side usage:**
+
+```javascript
+socket.on('chatStart', async ({ withVideo, partnerId }) => {
+  if (withVideo) {
+    // Get local media stream first
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true
+      });
+      
+      // Display local video
+      document.getElementById('local-video').srcObject = stream;
+      
+      // Signal ready for WebRTC connection
+      socket.emit('ready-to-connect');
+      
+    } catch (error) {
+      console.error('Failed to get media:', error);
+    }
+  }
+});
+```
+
+**Server-side behavior:**
+
+1. Adds socket ID to `rtcReadyUsers` Set
+2. Checks if chat partner is also ready
+3. If both ready, determines initiator by comparing socket IDs
+4. Lower socket ID becomes the initiator and receives `create-offer` event
+
+```javascript
+socket.on('ready-to-connect', () => {
+  rtcReadyUsers.add(socket.id);
+  
+  if (chatPairs[socket.id]) {
+    const partnerId = chatPairs[socket.id].partner;
+    
+    if (rtcReadyUsers.has(partnerId)) {
+      // Both ready - lower socket ID creates offer
+      if (socket.id < partnerId) {
+        socket.emit('create-offer');
+      }
+    }
+  }
+});
+```
+
+**Code reference:** server.js:225-237
+
+### `create-offer`
+
+**Direction:** Server → Client
+
+**Purpose:** Instruct client to create and send WebRTC offer
+
+**Payload:** None
+
+**Received by:** The user whose socket ID is lexicographically lower (ensures only one user initiates)
+
+**Client-side usage:**
+
+```javascript
+let peerConnection;
+
+// Initialize peer connection
+function initPeerConnection() {
+  const config = {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' }
+    ]
+  };
+  
+  peerConnection = new RTCPeerConnection(config);
+  
+  // Add local stream tracks
+  localStream.getTracks().forEach(track => {
+    peerConnection.addTrack(track, localStream);
+  });
+  
+  // Handle incoming tracks
+  peerConnection.ontrack = (event) => {
+    document.getElementById('remote-video').srcObject = event.streams[0];
+  };
+  
+  // Handle ICE candidates
+  peerConnection.onicecandidate = (event) => {
+    if (event.candidate) {
+      socket.emit('ice-candidate', { candidate: event.candidate });
+    }
+  };
+  
+  return peerConnection;
+}
+
+// Create and send offer
+socket.on('create-offer', async () => {
+  try {
+    peerConnection = initPeerConnection();
+    
+    // Create offer
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+    
+    // Send offer to peer via signaling server
+    socket.emit('webrtc-offer', { offer: offer });
+    
+  } catch (error) {
+    console.error('Error creating offer:', error);
+  }
+});
+```
+
+### `webrtc-offer`
+
+**Direction:** Client → Server → Other Client
+
+**Purpose:** Send WebRTC offer from initiator to receiver
+
+**Payload:**
+
+```typescript
+type WebRTCOfferPayload = {
+  offer: RTCSessionDescriptionInit; // WebRTC offer SDP
+};
+
+// Server adds 'from' field when forwarding:
+type WebRTCOfferReceived = {
+  offer: RTCSessionDescriptionInit;
+  from: string;  // Socket ID of sender
+};
+```
+
+**Client-side (sender):**
+
+```javascript
+// After creating offer
+socket.emit('webrtc-offer', { offer: offer });
+```
+
+**Client-side (receiver):**
+
+```javascript
+socket.on('webrtc-offer', async ({ offer, from }) => {
+  console.log('Received offer from:', from);
+  
+  try {
+    // Initialize peer connection if not already done
+    if (!peerConnection) {
+      peerConnection = initPeerConnection();
+    }
+    
+    // Set remote description
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+    
+    // Create answer
+    const answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
+    
+    // Send answer back
+    socket.emit('webrtc-answer', { answer: answer });
+    
+  } catch (error) {
+    console.error('Error handling offer:', error);
+  }
+});
+```
+
+**Server-side behavior:**
+
+```javascript
+socket.on('webrtc-offer', (data) => {
+  if (chatPairs[socket.id]) {
+    const partnerId = chatPairs[socket.id].partner;
+    io.to(partnerId).emit('webrtc-offer', {
+      offer: data.offer,
+      from: socket.id
+    });
+  }
+});
+```
+
+**Code reference:** server.js:239-247
+
+### `webrtc-answer`
+
+**Direction:** Client → Server → Other Client
+
+**Purpose:** Send WebRTC answer from receiver back to initiator
+
+**Payload:**
+
+```typescript
+type WebRTCAnswerPayload = {
+  answer: RTCSessionDescriptionInit; // WebRTC answer SDP
+};
+
+// Server adds 'from' field when forwarding:
+type WebRTCAnswerReceived = {
+  answer: RTCSessionDescriptionInit;
+  from: string;  // Socket ID of sender
+};
+```
+
+**Client-side (sender):**
+
+```javascript
+// After creating answer
+socket.emit('webrtc-answer', { answer: answer });
+```
+
+**Client-side (receiver):**
+
+```javascript
+socket.on('webrtc-answer', async ({ answer, from }) => {
+  console.log('Received answer from:', from);
+  
+  try {
+    // Set remote description
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+    console.log('WebRTC connection established!');
+    
+  } catch (error) {
+    console.error('Error handling answer:', error);
+  }
+});
+```
+
+**Server-side behavior:**
+
+```javascript
+socket.on('webrtc-answer', (data) => {
+  if (chatPairs[socket.id]) {
+    const partnerId = chatPairs[socket.id].partner;
+    io.to(partnerId).emit('webrtc-answer', {
+      answer: data.answer,
+      from: socket.id
+    });
+  }
+});
+```
+
+**Code reference:** server.js:249-257
+
+### `ice-candidate`
+
+**Direction:** Client ↔ Server ↔ Other Client (bidirectional)
+
+**Purpose:** Exchange ICE candidates for NAT traversal and optimal connection path
+
+**Payload:**
+
+```typescript
+type ICECandidatePayload = {
+  candidate: RTCIceCandidate; // ICE candidate information
+};
+
+// Server adds 'from' field when forwarding:
+type ICECandidateReceived = {
+  candidate: RTCIceCandidate;
+  from: string;  // Socket ID of sender
+};
+```
+
+**When emitted:** 
+- Automatically by browser during WebRTC connection setup
+- Triggered by `peerConnection.onicecandidate` event
+- Can be emitted multiple times as browser discovers new candidates
+
+**Client-side (sender):**
+
+```javascript
+peerConnection.onicecandidate = (event) => {
+  if (event.candidate) {
+    console.log('New ICE candidate:', event.candidate);
+    socket.emit('ice-candidate', { candidate: event.candidate });
+  } else {
+    console.log('ICE candidate gathering complete');
+  }
+};
+```
+
+**Client-side (receiver):**
+
+```javascript
+socket.on('ice-candidate', async ({ candidate, from }) => {
+  console.log('Received ICE candidate from:', from);
+  
+  try {
+    if (peerConnection && candidate) {
+      await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+      console.log('ICE candidate added successfully');
+    }
+  } catch (error) {
+    console.error('Error adding ICE candidate:', error);
+  }
+});
+```
+
+**Server-side behavior:**
+
+```javascript
+socket.on('ice-candidate', (data) => {
+  if (chatPairs[socket.id]) {
+    const partnerId = chatPairs[socket.id].partner;
+    io.to(partnerId).emit('ice-candidate', {
+      candidate: data.candidate,
+      from: socket.id
+    });
+  }
+});
+```
+
+**Code reference:** server.js:259-267
+
+## Complete WebRTC Setup Example
+
+```javascript
+class WebRTCManager {
+  constructor(socket) {
+    this.socket = socket;
+    this.peerConnection = null;
+    this.localStream = null;
+    this.setupSignaling();
+  }
+  
+  setupSignaling() {
+    // Server instructs us to create offer
+    this.socket.on('create-offer', () => {
+      this.createOffer();
+    });
+    
+    // Received offer from peer
+    this.socket.on('webrtc-offer', ({ offer, from }) => {
+      this.handleOffer(offer, from);
+    });
+    
+    // Received answer from peer
+    this.socket.on('webrtc-answer', ({ answer, from }) => {
+      this.handleAnswer(answer, from);
+    });
+    
+    // Received ICE candidate from peer
+    this.socket.on('ice-candidate', ({ candidate, from }) => {
+      this.handleICECandidate(candidate, from);
+    });
+  }
+  
+  async initializeMedia() {
+    try {
+      this.localStream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 1280, height: 720 },
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      });
+      
+      // Display local video
+      const localVideo = document.getElementById('local-video');
+      localVideo.srcObject = this.localStream;
+      
+      // Signal ready for WebRTC
+      this.socket.emit('ready-to-connect');
+      
+      return this.localStream;
+      
+    } catch (error) {
+      console.error('Error accessing media devices:', error);
+      throw error;
+    }
+  }
+  
+  createPeerConnection() {
+    const config = {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' }
+      ]
+    };
+    
+    this.peerConnection = new RTCPeerConnection(config);
+    
+    // Add local tracks
+    this.localStream.getTracks().forEach(track => {
+      this.peerConnection.addTrack(track, this.localStream);
+    });
+    
+    // Handle remote stream
+    this.peerConnection.ontrack = (event) => {
+      console.log('Received remote track:', event.track.kind);
+      const remoteVideo = document.getElementById('remote-video');
+      if (!remoteVideo.srcObject) {
+        remoteVideo.srcObject = event.streams[0];
+      }
+    };
+    
+    // Handle ICE candidates
+    this.peerConnection.onicecandidate = (event) => {
+      if (event.candidate) {
+        console.log('Sending ICE candidate');
+        this.socket.emit('ice-candidate', { candidate: event.candidate });
+      }
+    };
+    
+    // Connection state monitoring
+    this.peerConnection.onconnectionstatechange = () => {
+      console.log('Connection state:', this.peerConnection.connectionState);
+      if (this.peerConnection.connectionState === 'connected') {
+        console.log('WebRTC connection established!');
+      }
+    };
+    
+    // ICE connection state monitoring
+    this.peerConnection.oniceconnectionstatechange = () => {
+      console.log('ICE connection state:', this.peerConnection.iceConnectionState);
+      if (this.peerConnection.iceConnectionState === 'failed') {
+        console.error('ICE connection failed');
+        this.restartICE();
+      }
+    };
+    
+    return this.peerConnection;
+  }
+  
+  async createOffer() {
+    try {
+      console.log('Creating WebRTC offer');
+      
+      this.createPeerConnection();
+      
+      const offer = await this.peerConnection.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true
+      });
+      
+      await this.peerConnection.setLocalDescription(offer);
+      
+      console.log('Sending offer to peer');
+      this.socket.emit('webrtc-offer', { offer: offer });
+      
+    } catch (error) {
+      console.error('Error creating offer:', error);
+    }
+  }
+  
+  async handleOffer(offer, from) {
+    try {
+      console.log('Handling offer from:', from);
+      
+      if (!this.peerConnection) {
+        this.createPeerConnection();
+      }
+      
+      await this.peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+      
+      const answer = await this.peerConnection.createAnswer();
+      await this.peerConnection.setLocalDescription(answer);
+      
+      console.log('Sending answer to peer');
+      this.socket.emit('webrtc-answer', { answer: answer });
+      
+    } catch (error) {
+      console.error('Error handling offer:', error);
+    }
+  }
+  
+  async handleAnswer(answer, from) {
+    try {
+      console.log('Handling answer from:', from);
+      
+      await this.peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+      console.log('Remote description set successfully');
+      
+    } catch (error) {
+      console.error('Error handling answer:', error);
+    }
+  }
+  
+  async handleICECandidate(candidate, from) {
+    try {
+      if (this.peerConnection && candidate) {
+        await this.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+        console.log('ICE candidate added');
+      }
+    } catch (error) {
+      console.error('Error adding ICE candidate:', error);
+    }
+  }
+  
+  async restartICE() {
+    try {
+      console.log('Restarting ICE...');
+      const offer = await this.peerConnection.createOffer({ iceRestart: true });
+      await this.peerConnection.setLocalDescription(offer);
+      this.socket.emit('webrtc-offer', { offer: offer });
+    } catch (error) {
+      console.error('Error restarting ICE:', error);
+    }
+  }
+  
+  cleanup() {
+    // Stop local tracks
+    if (this.localStream) {
+      this.localStream.getTracks().forEach(track => track.stop());
+    }
+    
+    // Close peer connection
+    if (this.peerConnection) {
+      this.peerConnection.close();
+    }
+    
+    this.peerConnection = null;
+    this.localStream = null;
+  }
+}
+
+// Usage
+const socket = io('http://localhost:3001');
+const webrtc = new WebRTCManager(socket);
+
+socket.on('chatStart', async ({ withVideo, partnerId }) => {
+  if (withVideo) {
+    try {
+      await webrtc.initializeMedia();
+      console.log('Ready for video chat with', partnerId);
+    } catch (error) {
+      console.error('Failed to initialize video:', error);
+    }
+  }
+});
+
+// Cleanup when chat ends
+socket.on('partnerLeft', () => {
+  webrtc.cleanup();
+});
+
+document.getElementById('next-btn').addEventListener('click', () => {
+  webrtc.cleanup();
+  socket.emit('next');
+});
+```
+
+## WebRTC State Management
+
+### Server-side State
+
+```javascript
+// Tracks which users are ready for WebRTC
+let rtcReadyUsers = new Set(); // Set of socket IDs
+
+// Cleaned up when:
+// - User disconnects (server.js:277)
+// - Chat pair is cleaned up (server.js:310-311)
+```
+
+### Cleanup on Chat End
+
+**Server-side cleanup (automatic):**
+
+```javascript
+function cleanupChatPair(socketId) {
+  // ... other cleanup
+  
+  // Clean up WebRTC ready status
+  rtcReadyUsers.delete(socketId);
+  rtcReadyUsers.delete(partnerId);
+}
+```
+
+**Client-side cleanup (required):**
+
+```javascript
+socket.on('partnerLeft', () => {
+  // Stop local tracks
+  localStream.getTracks().forEach(track => track.stop());
+  
+  // Close peer connection
+  if (peerConnection) {
+    peerConnection.close();
+    peerConnection = null;
+  }
+  
+  // Clear video elements
+  document.getElementById('local-video').srcObject = null;
+  document.getElementById('remote-video').srcObject = null;
+});
+```
+
+**Code reference:** server.js:310-311
+
+## Common Issues & Debugging
+
+### Issue: No video/audio received
+
+**Causes:**
+1. Peer connection not established
+2. ICE candidates not being exchanged
+3. Firewall/NAT blocking connection
+4. STUN servers not responding
+
+**Debug:**
+```javascript
+peerConnection.oniceconnectionstatechange = () => {
+  console.log('ICE state:', peerConnection.iceConnectionState);
+  // States: new, checking, connected, completed, failed, disconnected, closed
+};
+
+peerConnection.onconnectionstatechange = () => {
+  console.log('Connection state:', peerConnection.connectionState);
+  // States: new, connecting, connected, disconnected, failed, closed
+};
+```
+
+### Issue: Connection fails repeatedly
+
+**Solution:** Add TURN servers for NAT traversal
+
+```javascript
+const config = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    {
+      urls: 'turn:your-turn-server.com:3478',
+      username: 'username',
+      credential: 'password'
+    }
+  ]
+};
+```
+
+### Issue: Only one user sees video
+
+**Cause:** One user didn't emit `ready-to-connect` or didn't create peer connection
+
+**Solution:** Ensure both users:
+1. Receive `chatStart` with `withVideo: true`
+2. Successfully get local media stream
+3. Emit `ready-to-connect`
+4. Handle all signaling events
+
+## Related Events
+
+- [chatStart](/api/socket/matching#chatstart) - Initiates WebRTC flow when `withVideo: true`
+- [partnerLeft](/api/socket/messaging#partnerleft) - Triggers WebRTC cleanup
+- [disconnect](/api/socket/connection#disconnect) - Automatic cleanup of WebRTC state

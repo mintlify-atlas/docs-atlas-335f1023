@@ -1,0 +1,619 @@
+---
+title: "Chat Messaging"
+description: "Text messaging events and chat lifecycle management"
+---
+
+## Overview
+
+MeetMates supports real-time text messaging between matched users. All messages are sent through Socket.IO rooms for efficient delivery and are enriched with sender information on the server side.
+
+## Messaging Flow
+
+```
+User A                     Server                      User B
+  |                          |                           |
+  |                    [In same room]                    |
+  |                          |                           |
+  |---sendMessage(text)----->|                           |
+  |                          |                           |
+  |<-------message-----------|--------message----------->|
+  | {sender, text,           |  {sender, text,           |
+  |  senderEmail,            |   senderEmail,            |
+  |  timestamp}              |   timestamp}              |
+```
+
+## Events
+
+### `sendMessage`
+
+**Direction:** Client → Server
+
+**Purpose:** Send a text message to the chat partner
+
+**Payload:**
+
+```typescript
+type SendMessagePayload = string; // The message text
+```
+
+**Requirements:**
+- User must be in an active chat (have entry in `chatPairs`)
+- Message is a plain string
+
+**Client-side usage:**
+
+```javascript
+function sendMessage(text) {
+  if (text.trim().length > 0) {
+    socket.emit('sendMessage', text);
+  }
+}
+
+// Example: Send message on Enter key
+document.getElementById('message-input').addEventListener('keypress', (e) => {
+  if (e.key === 'Enter') {
+    const input = e.target;
+    sendMessage(input.value);
+    input.value = ''; // Clear input
+  }
+});
+
+// Example: Send message on button click
+document.getElementById('send-btn').addEventListener('click', () => {
+  const input = document.getElementById('message-input');
+  sendMessage(input.value);
+  input.value = '';
+});
+```
+
+**Server-side behavior:**
+
+1. Checks if sender is in a chat pair
+2. Retrieves authenticated user info (if available)
+3. Constructs message object with metadata
+4. Broadcasts message to the room (both users receive it)
+
+```javascript
+socket.on('sendMessage', (message) => {
+  if (chatPairs[socket.id]) {
+    const userInfo = authenticatedUsers.get(socket.id);
+    io.to(chatPairs[socket.id].room).emit('message', {
+      sender: socket.id,
+      text: message,
+      senderEmail: userInfo?.email || 'Anonymous',
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+```
+
+**Note:** The sender also receives their own message via the `message` event. This ensures consistent message ordering across all clients.
+
+**Code reference:** server.js:173-183
+
+### `message`
+
+**Direction:** Server → Client (broadcast to room)
+
+**Purpose:** Deliver a message to all users in the chat room
+
+**Payload:**
+
+```typescript
+type MessagePayload = {
+  sender: string;       // Socket ID of sender
+  text: string;         // Message content
+  senderEmail: string;  // Email of sender (or 'Anonymous')
+  timestamp: string;    // ISO 8601 timestamp
+};
+```
+
+**Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `sender` | string | Socket ID of the message sender |
+| `text` | string | The actual message text |
+| `senderEmail` | string | Sender's email if authenticated, otherwise `'Anonymous'` |
+| `timestamp` | string | Server timestamp in ISO 8601 format (e.g., `"2026-03-05T14:30:00.000Z"`) |
+
+**Received by:** Both users in the chat room (including sender)
+
+**Client-side usage:**
+
+```javascript
+socket.on('message', ({ sender, text, senderEmail, timestamp }) => {
+  const isOwnMessage = sender === socket.id;
+  displayMessage(text, isOwnMessage, senderEmail, timestamp);
+});
+
+function displayMessage(text, isOwn, email, timestamp) {
+  const messagesContainer = document.getElementById('messages');
+  const messageDiv = document.createElement('div');
+  
+  messageDiv.className = isOwn ? 'message own-message' : 'message partner-message';
+  
+  const time = new Date(timestamp).toLocaleTimeString();
+  const sender = isOwn ? 'You' : email;
+  
+  messageDiv.innerHTML = `
+    <div class="message-header">
+      <span class="sender">${sender}</span>
+      <span class="time">${time}</span>
+    </div>
+    <div class="message-text">${escapeHtml(text)}</div>
+  `;
+  
+  messagesContainer.appendChild(messageDiv);
+  messagesContainer.scrollTop = messagesContainer.scrollHeight;
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+```
+
+**Example message object:**
+
+```json
+{
+  "sender": "abc123xyz",
+  "text": "Hello! How are you?",
+  "senderEmail": "user@college.edu",
+  "timestamp": "2026-03-05T14:30:45.123Z"
+}
+```
+
+**Code reference:** server.js:176-182
+
+## Chat Lifecycle Events
+
+### `partnerLeft`
+
+**Direction:** Server → Client
+
+**Purpose:** Notify user that their chat partner has left the conversation
+
+**Payload:**
+
+```typescript
+type PartnerLeftPayload = {
+  partnerId: string;  // Socket ID of the partner who left
+};
+```
+
+**Emitted when:**
+- Partner disconnects (closes browser, loses connection)
+- Partner clicks "Next" to find new partner
+- Partner calls `findChat` while in active chat
+
+**Client-side usage:**
+
+```javascript
+socket.on('partnerLeft', ({ partnerId }) => {
+  console.log(`Partner ${partnerId} left the chat`);
+  
+  // Show notification
+  showNotification('Your chat partner has left');
+  
+  // Disable message input
+  document.getElementById('message-input').disabled = true;
+  document.getElementById('send-btn').disabled = true;
+  
+  // Clean up WebRTC if video chat
+  if (peerConnection) {
+    peerConnection.close();
+    peerConnection = null;
+  }
+  
+  // Stop local media
+  if (localStream) {
+    localStream.getTracks().forEach(track => track.stop());
+  }
+  
+  // Show options to find new partner
+  showFindNewPartnerButton();
+});
+
+function showNotification(message) {
+  const notification = document.createElement('div');
+  notification.className = 'notification';
+  notification.textContent = message;
+  document.body.appendChild(notification);
+  
+  setTimeout(() => {
+    notification.remove();
+  }, 5000);
+}
+
+function showFindNewPartnerButton() {
+  const button = document.createElement('button');
+  button.textContent = 'Find New Partner';
+  button.onclick = () => {
+    socket.emit('findChat', userEmail, withVideo);
+  };
+  document.getElementById('chat-actions').appendChild(button);
+}
+```
+
+**Server-side triggers:**
+
+1. **During `next` event:**
+```javascript
+socket.on('next', () => {
+  if (chatPairs[socket.id]) {
+    const partnerId = chatPairs[socket.id].partner;
+    io.to(partnerId).emit('partnerLeft', { partnerId: socket.id });
+    // ... cleanup
+  }
+});
+```
+
+2. **During `disconnect` event:**
+```javascript
+socket.on('disconnect', () => {
+  if (chatPairs[socket.id]) {
+    const partnerId = chatPairs[socket.id].partner;
+    io.to(partnerId).emit('partnerLeft', { partnerId: socket.id });
+    // ... cleanup
+  }
+});
+```
+
+3. **During `findChat` when already in chat:**
+```javascript
+socket.on('findChat', (collegeEmail, withVideo) => {
+  if (chatPairs[socket.id]) {
+    const partner = chatPairs[socket.id].partner;
+    io.to(partner).emit('partnerLeft', { partnerId: socket.id });
+    // ... cleanup and re-queue
+  }
+});
+```
+
+**Code reference:** server.js:154, 194, 283
+
+## Complete Messaging Example
+
+```javascript
+class ChatMessaging {
+  constructor(socket) {
+    this.socket = socket;
+    this.currentPartner = null;
+    this.messages = [];
+    this.setupListeners();
+  }
+  
+  setupListeners() {
+    // Chat started
+    this.socket.on('chatStart', ({ withVideo, partnerId }) => {
+      this.currentPartner = partnerId;
+      this.messages = [];
+      this.enableChat();
+      console.log(`Chat started with ${partnerId}`);
+    });
+    
+    // Message received
+    this.socket.on('message', (messageData) => {
+      this.handleMessage(messageData);
+    });
+    
+    // Partner left
+    this.socket.on('partnerLeft', ({ partnerId }) => {
+      this.handlePartnerLeft(partnerId);
+    });
+    
+    // Waiting for partner
+    this.socket.on('waiting', () => {
+      this.disableChat();
+      this.showWaitingMessage();
+    });
+  }
+  
+  handleMessage({ sender, text, senderEmail, timestamp }) {
+    const isOwn = sender === this.socket.id;
+    
+    // Store message
+    this.messages.push({
+      sender,
+      text,
+      senderEmail,
+      timestamp,
+      isOwn
+    });
+    
+    // Display message
+    this.displayMessage(text, isOwn, senderEmail, timestamp);
+    
+    // Play notification sound for partner messages
+    if (!isOwn) {
+      this.playNotificationSound();
+    }
+  }
+  
+  sendMessage(text) {
+    if (!this.currentPartner) {
+      console.error('No active chat');
+      return;
+    }
+    
+    if (text.trim().length === 0) {
+      return;
+    }
+    
+    // Limit message length
+    if (text.length > 1000) {
+      alert('Message too long (max 1000 characters)');
+      return;
+    }
+    
+    this.socket.emit('sendMessage', text);
+  }
+  
+  displayMessage(text, isOwn, email, timestamp) {
+    const container = document.getElementById('messages-container');
+    const messageEl = document.createElement('div');
+    
+    messageEl.className = `message ${isOwn ? 'own' : 'partner'}`;
+    
+    const time = new Date(timestamp).toLocaleTimeString([], { 
+      hour: '2-digit', 
+      minute: '2-digit' 
+    });
+    
+    messageEl.innerHTML = `
+      <div class="message-bubble">
+        <div class="message-header">
+          <span class="sender">${isOwn ? 'You' : email}</span>
+          <span class="timestamp">${time}</span>
+        </div>
+        <div class="message-content">${this.escapeHtml(text)}</div>
+      </div>
+    `;
+    
+    container.appendChild(messageEl);
+    
+    // Auto-scroll to bottom
+    container.scrollTop = container.scrollHeight;
+  }
+  
+  handlePartnerLeft(partnerId) {
+    console.log(`Partner ${partnerId} left`);
+    
+    this.currentPartner = null;
+    this.disableChat();
+    
+    // Show system message
+    const container = document.getElementById('messages-container');
+    const systemMsg = document.createElement('div');
+    systemMsg.className = 'system-message';
+    systemMsg.textContent = 'Your chat partner has left';
+    container.appendChild(systemMsg);
+    
+    // Show options
+    this.showPostChatOptions();
+  }
+  
+  enableChat() {
+    const input = document.getElementById('message-input');
+    const sendBtn = document.getElementById('send-btn');
+    const nextBtn = document.getElementById('next-btn');
+    
+    input.disabled = false;
+    sendBtn.disabled = false;
+    nextBtn.disabled = false;
+    
+    input.focus();
+  }
+  
+  disableChat() {
+    const input = document.getElementById('message-input');
+    const sendBtn = document.getElementById('send-btn');
+    
+    input.disabled = true;
+    sendBtn.disabled = true;
+    input.value = '';
+  }
+  
+  showWaitingMessage() {
+    const container = document.getElementById('messages-container');
+    container.innerHTML = '<div class="system-message">Looking for someone to chat with...</div>';
+  }
+  
+  showPostChatOptions() {
+    const container = document.getElementById('chat-actions');
+    container.innerHTML = `
+      <button onclick="chatManager.findNewChat()">Find New Partner</button>
+      <button onclick="chatManager.exportChatHistory()">Save Chat</button>
+    `;
+  }
+  
+  findNewChat() {
+    const withVideo = confirm('Start video chat?');
+    this.socket.emit('findChat', null, withVideo);
+  }
+  
+  exportChatHistory() {
+    const text = this.messages.map(msg => 
+      `[${new Date(msg.timestamp).toLocaleString()}] ${msg.senderEmail}: ${msg.text}`
+    ).join('\n');
+    
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `chat-${Date.now()}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+  
+  escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+  
+  playNotificationSound() {
+    // Optional: Play sound for new messages
+    const audio = new Audio('/sounds/notification.mp3');
+    audio.play().catch(e => console.log('Could not play sound:', e));
+  }
+}
+
+// Initialize
+const socket = io('http://localhost:3001', {
+  auth: { token: localStorage.getItem('authToken') }
+});
+
+const chatManager = new ChatMessaging(socket);
+
+// UI Event Handlers
+document.getElementById('message-input').addEventListener('keypress', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    const text = e.target.value;
+    chatManager.sendMessage(text);
+    e.target.value = '';
+  }
+});
+
+document.getElementById('send-btn').addEventListener('click', () => {
+  const input = document.getElementById('message-input');
+  chatManager.sendMessage(input.value);
+  input.value = '';
+});
+
+document.getElementById('next-btn').addEventListener('click', () => {
+  if (confirm('End this chat and find a new partner?')) {
+    socket.emit('next');
+  }
+});
+```
+
+## Message Storage
+
+**Important:** Messages are **NOT** stored on the server. The MeetMates server only relays messages in real-time.
+
+**Implications:**
+- No message history is available after chat ends
+- No message persistence between sessions
+- No message retrieval after disconnection
+- Messages only exist during active chat session
+
+**If message storage is needed:**
+
+You would need to implement server-side storage:
+
+```javascript
+// Example: Store messages in MongoDB
+const Message = require('./models/Message');
+
+socket.on('sendMessage', async (message) => {
+  if (chatPairs[socket.id]) {
+    const userInfo = authenticatedUsers.get(socket.id);
+    const messageData = {
+      sender: socket.id,
+      text: message,
+      senderEmail: userInfo?.email || 'Anonymous',
+      timestamp: new Date().toISOString(),
+      roomId: chatPairs[socket.id].room
+    };
+    
+    // Save to database
+    await Message.create(messageData);
+    
+    // Broadcast to room
+    io.to(chatPairs[socket.id].room).emit('message', messageData);
+  }
+});
+```
+
+## Best Practices
+
+### Message Validation
+
+```javascript
+function validateMessage(text) {
+  // Length check
+  if (text.length === 0 || text.length > 1000) {
+    return { valid: false, error: 'Message must be 1-1000 characters' };
+  }
+  
+  // Sanitize HTML
+  const sanitized = text.replace(/<[^>]*>/g, '');
+  
+  // Check for spam patterns (optional)
+  const spamPatterns = [/http:\/\//gi, /https:\/\//gi];
+  for (const pattern of spamPatterns) {
+    if (pattern.test(sanitized)) {
+      return { valid: false, error: 'Links not allowed' };
+    }
+  }
+  
+  return { valid: true, sanitized };
+}
+```
+
+### Rate Limiting
+
+Consider implementing client-side rate limiting:
+
+```javascript
+class RateLimiter {
+  constructor(maxMessages, timeWindow) {
+    this.maxMessages = maxMessages; // e.g., 10
+    this.timeWindow = timeWindow;   // e.g., 10000ms (10 seconds)
+    this.messages = [];
+  }
+  
+  canSend() {
+    const now = Date.now();
+    // Remove old messages outside time window
+    this.messages = this.messages.filter(time => now - time < this.timeWindow);
+    
+    if (this.messages.length >= this.maxMessages) {
+      return false;
+    }
+    
+    this.messages.push(now);
+    return true;
+  }
+}
+
+const rateLimiter = new RateLimiter(10, 10000);
+
+function sendMessage(text) {
+  if (!rateLimiter.canSend()) {
+    alert('Slow down! You\'re sending messages too quickly.');
+    return;
+  }
+  
+  socket.emit('sendMessage', text);
+}
+```
+
+### XSS Prevention
+
+Always escape HTML when displaying messages:
+
+```javascript
+function escapeHtml(text) {
+  const map = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#039;'
+  };
+  return text.replace(/[&<>"']/g, m => map[m]);
+}
+```
+
+## Related Events
+
+- [chatStart](/api/socket/matching#chatstart) - Enables messaging after match
+- [next](/api/socket/matching#next) - Ends current chat and triggers `partnerLeft`
+- [disconnect](/api/socket/connection#disconnect) - Automatically triggers `partnerLeft` for partner
+- [waiting](/api/socket/matching#waiting) - Disables messaging while searching for partner

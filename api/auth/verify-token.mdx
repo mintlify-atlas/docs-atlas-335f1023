@@ -1,0 +1,137 @@
+---
+title: "Verify Token"
+api: "GET /api/verify-token"
+description: "Verify the validity of a JWT token and retrieve user information"
+---
+
+This endpoint verifies that a JWT token is valid and returns the authenticated user's information. Use this to check if a user's session is still active.
+
+## Authentication
+
+**Required**: This endpoint requires a valid JWT token.
+
+Include the token in the request header:
+
+```bash
+Authorization: Bearer <token>
+```
+
+or
+
+```bash
+x-auth-token: <token>
+```
+
+## Request Example
+
+```bash
+curl -X GET https://api.meetmates.com/api/verify-token \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+```bash
+curl -X GET https://api.meetmates.com/api/verify-token \
+  -H "x-auth-token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+## Response
+
+<ResponseField name="success" type="boolean">
+  Indicates if the token is valid
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Success message confirming token validity
+</ResponseField>
+
+<ResponseField name="user" type="object">
+  Authenticated user information
+  <Expandable title="properties">
+    <ResponseField name="id" type="string">
+      User's unique identifier (MongoDB ObjectId)
+    </ResponseField>
+    <ResponseField name="email" type="string">
+      User's email address
+    </ResponseField>
+    <ResponseField name="name" type="string">
+      User's display name (may be null for email/password users)
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Response Example
+
+```json 200 - Success
+{
+  "success": true,
+  "message": "Token is valid",
+  "user": {
+    "id": "657f4d8e90c23a4567b38f91",
+    "email": "student@adgitmdelhi.ac.in",
+    "name": "John Doe"
+  }
+}
+```
+
+## Error Responses
+
+<ResponseField name="error" type="string">
+  Error message describing what went wrong
+</ResponseField>
+
+### Error Codes
+
+<ResponseExample>
+```json 401 - No Token Provided
+{
+  "error": "No token provided, authorization denied"
+}
+```
+
+```json 401 - User Not Found
+{
+  "error": "Token is not valid - user not found"
+}
+```
+
+```json 401 - Token Expired
+{
+  "error": "Token has expired"
+}
+```
+
+```json 401 - Invalid Token
+{
+  "error": "Invalid token"
+}
+```
+
+```json 500 - Server Error
+{
+  "error": "Server error in authentication"
+}
+```
+</ResponseExample>
+
+## Token Authentication Flow
+
+The endpoint performs the following checks:
+
+1. **Token Extraction**: Looks for token in `Authorization: Bearer <token>` header or `x-auth-token` header
+2. **Token Verification**: Verifies the JWT signature and expiration using the server's secret key
+3. **User Lookup**: Retrieves the user from the database using the ID from the token
+4. **Response**: Returns user information (excluding password)
+
+## Use Cases
+
+- **Session Validation**: Check if a stored token is still valid before making authenticated requests
+- **User Profile Loading**: Retrieve current user information on app startup
+- **Token Refresh Logic**: Determine when to prompt user for re-authentication
+- **Protected Route Guards**: Verify authentication before allowing access to protected features
+
+## Notes
+
+- The password field is excluded from the response for security
+- Tokens expire after 7 days from issuance
+- If the user is deleted from the database, their token becomes invalid even if not expired
+- This endpoint does not extend or refresh the token expiration time

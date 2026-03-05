@@ -1,0 +1,663 @@
+---
+title: Installation Guide
+description: Detailed installation instructions for MeetMates frontend and backend components
+---
+
+## System Requirements
+
+<CardGroup cols={2}>
+  <Card title="Development" icon="laptop-code">
+    - Node.js 16.x or higher
+    - npm 8.x or higher
+    - MongoDB 5.x or higher
+    - 4GB RAM minimum
+    - Modern browser (Chrome, Firefox, Safari)
+  </Card>
+  
+  <Card title="Production" icon="server">
+    - Node.js 18.x LTS recommended
+    - MongoDB Atlas or self-hosted
+    - SSL certificate (for WebRTC)
+    - 2GB RAM minimum per instance
+    - Linux server recommended
+  </Card>
+</CardGroup>
+
+## Frontend Installation
+
+### 1. Clone and Navigate
+
+```bash
+git clone https://github.com/your-username/meetmates.git
+cd meetmates/frontend
+```
+
+### 2. Install Dependencies
+
+The frontend uses React 19 with Vite as the build tool:
+
+```bash
+npm install
+```
+
+<Info>
+  **Key Dependencies:**
+  - `react@19.0.0` - UI framework
+  - `vite@6.2.3` - Build tool and dev server
+  - `socket.io-client@4.8.1` - Real-time communication
+  - `tailwindcss@4.0.13` - Styling
+  - `lucide-react@0.525.0` - Icons
+  - `axios@1.8.4` - HTTP client
+</Info>
+
+### 3. Configure Environment Variables
+
+Create a `.env` file in the `frontend` directory:
+
+```bash frontend/.env
+VITE_BACKEND_URL=http://localhost:3001
+VITE_GOOGLE_CLIENT_ID=YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com
+```
+
+<ParamField path="VITE_BACKEND_URL" type="string" required>
+  The URL where your backend server is running. For local development, use `http://localhost:3001`. For production, use your deployed backend URL with HTTPS.
+</ParamField>
+
+<ParamField path="VITE_GOOGLE_CLIENT_ID" type="string" required>
+  Your Google OAuth 2.0 Client ID from Google Cloud Console. This is used for college email authentication.
+</ParamField>
+
+### 4. Socket.IO Configuration
+
+The Socket.IO client is configured in `frontend/src/Socket.jsx`:
+
+```javascript frontend/src/Socket.jsx
+import { io } from "socket.io-client";
+
+const socket = io(import.meta.env.VITE_BACKEND_URL, {
+  autoConnect: false,
+});
+
+export default socket;
+```
+
+<Note>
+  The socket connection is set to manual (`autoConnect: false`) to ensure proper authentication token handling before connecting.
+</Note>
+
+### 5. Run Development Server
+
+```bash
+npm run dev
+```
+
+The application will be available at `http://localhost:5173`
+
+### 6. Build for Production
+
+```bash
+npm run build
+```
+
+This creates an optimized production build in the `dist` directory.
+
+<CodeGroup>
+```bash Preview Build
+npm run preview
+```
+
+```bash Deploy to Vercel
+vercel --prod
+```
+
+```bash Deploy to Netlify
+netlify deploy --prod
+```
+</CodeGroup>
+
+---
+
+## Backend Installation
+
+### 1. Navigate to Backend Directory
+
+```bash
+cd backend
+```
+
+### 2. Install Dependencies
+
+```bash
+npm install
+```
+
+<Info>
+  **Key Dependencies:**
+  - `express@4.21.2` - Web framework
+  - `socket.io@4.8.1` - WebSocket server
+  - `mongoose@8.13.2` - MongoDB ODM
+  - `jsonwebtoken@9.0.2` - JWT authentication
+  - `google-auth-library@10.1.0` - Google OAuth
+  - `bcrypt@6.0.0` - Password hashing
+  - `dotenv@16.5.0` - Environment variables
+  - `cors@2.8.5` - Cross-origin resource sharing
+</Info>
+
+### 3. Configure Environment Variables
+
+Create a `.env` file in the `backend` directory:
+
+```bash backend/.env
+MONGODB_URI=mongodb://localhost:27017/meetmates
+JWT_SECRET=your-super-secret-jwt-key-minimum-32-characters
+CORS_ORIGIN=http://localhost:5173,https://www.meetmates.space
+PORT=3001
+GOOGLE_CLIENT_ID=YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com
+```
+
+<ParamField path="MONGODB_URI" type="string" required>
+  MongoDB connection string. For local development: `mongodb://localhost:27017/meetmates`
+  
+  For MongoDB Atlas: `mongodb+srv://username:password@cluster.mongodb.net/meetmates`
+</ParamField>
+
+<ParamField path="JWT_SECRET" type="string" required>
+  Secret key for signing JWT tokens. Must be at least 32 characters. Generate using:
+  ```bash
+  node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+  ```
+</ParamField>
+
+<ParamField path="CORS_ORIGIN" type="string" required>
+  Comma-separated list of allowed origins for CORS. Include both development and production URLs.
+</ParamField>
+
+<ParamField path="PORT" type="number" default="3001">
+  Port number for the backend server to listen on.
+</ParamField>
+
+<ParamField path="GOOGLE_CLIENT_ID" type="string" required>
+  Your Google OAuth 2.0 Client ID for verifying Google authentication tokens on the backend.
+</ParamField>
+
+### 4. Database Setup
+
+The application uses MongoDB with the following schema:
+
+```javascript backend/models/User.js
+const userSchema = new mongoose.Schema({
+  email: {
+    type: String,
+    required: true,
+    unique: true,
+    lowercase: true,
+    trim: true
+  },
+  password: {
+    type: String,
+    required: function() {
+      return !this.isGoogleUser;
+    },
+    minlength: 6
+  },
+  name: {
+    type: String,
+    trim: true
+  },
+  googleId: {
+    type: String,
+    unique: true,
+    sparse: true
+  },
+  isGoogleUser: {
+    type: Boolean,
+    default: false
+  },
+  profilePicture: {
+    type: String
+  },
+  withVideo: {
+    type: Boolean,
+    default: true
+  },
+  isVerified: {
+    type: Boolean,
+    default: false
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
+});
+```
+
+<Warning>
+  Passwords are automatically hashed using bcrypt before saving. Never store plain text passwords.
+</Warning>
+
+### 5. Start the Server
+
+<CodeGroup>
+```bash Development
+npm start
+```
+
+```bash Production with PM2
+pm2 start server.js --name meetmates-backend
+```
+
+```bash Docker
+docker build -t meetmates-backend .
+docker run -p 3001:3001 --env-file .env meetmates-backend
+```
+</CodeGroup>
+
+You should see:
+```
+Server running on port 3001
+MongoDB connected
+```
+
+### 6. Server Architecture
+
+The backend server (`backend/server.js`) implements:
+
+<Tabs>
+  <Tab title="HTTP Routes">
+    ```javascript
+    // Authentication routes
+    POST /api/auth/signup          // Email/password signup
+    POST /api/auth/login           // Email/password login
+    POST /api/auth/google-login    // Google OAuth login
+    POST /api/auth/image-login     // ID card verification
+    
+    // Protected routes
+    GET  /api/profile              // Get user profile (requires JWT)
+    GET  /api/verify-token         // Verify JWT validity
+    ```
+  </Tab>
+  
+  <Tab title="Socket.IO Events">
+    ```javascript
+    // Client → Server events
+    socket.emit('findChat', email, withVideo)  // Request chat partner
+    socket.emit('sendMessage', message)         // Send text message
+    socket.emit('next')                         // Skip to next partner
+    socket.emit('ready-to-connect')            // Ready for WebRTC
+    socket.emit('webrtc-offer', offer)         // WebRTC offer
+    socket.emit('webrtc-answer', answer)       // WebRTC answer
+    socket.emit('ice-candidate', candidate)    // ICE candidate
+    
+    // Server → Client events
+    socket.on('waiting')                        // Waiting for match
+    socket.on('chatStart', {withVideo, partnerId}) // Match found
+    socket.on('message', {sender, text})        // Receive message
+    socket.on('partnerLeft', {partnerId})       // Partner disconnected
+    socket.on('onlineUsers', count)             // Online user count
+    socket.on('create-offer')                   // Initiate WebRTC offer
+    ```
+  </Tab>
+  
+  <Tab title="Matching Logic">
+    The server implements intelligent user matching:
+    
+    ```javascript backend/server.js (excerpt)
+    function matchUsers() {
+      // First, match users with same video preference
+      matchUsersByVideoPreference();
+      
+      // Then match remaining users regardless of preference
+      if (waitingUsers.length >= 2) {
+        matchRemainingUsers();
+      }
+    }
+    
+    function matchUsersByVideoPreference() {
+      const videoUsers = waitingUsers.filter(id => 
+        videoEnabledUsers.has(id)
+      );
+      const textOnlyUsers = waitingUsers.filter(id => 
+        !videoEnabledUsers.has(id)
+      );
+      
+      // Match video users together
+      while (videoUsers.length >= 2) {
+        const user1 = videoUsers.shift();
+        const user2 = videoUsers.shift();
+        createChatPair(user1, user2, true);
+      }
+      
+      // Match text-only users together
+      while (textOnlyUsers.length >= 2) {
+        const user1 = textOnlyUsers.shift();
+        const user2 = textOnlyUsers.shift();
+        createChatPair(user1, user2, false);
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Google OAuth Setup
+
+<Steps>
+  <Step title="Create Google Cloud Project">
+    1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+    2. Click **Select a project** > **New Project**
+    3. Enter project name (e.g., "MeetMates") and click **Create**
+  </Step>
+  
+  <Step title="Enable Google+ API">
+    1. Navigate to **APIs & Services** > **Library**
+    2. Search for "Google+ API"
+    3. Click **Enable**
+  </Step>
+  
+  <Step title="Configure OAuth Consent Screen">
+    1. Go to **APIs & Services** > **OAuth consent screen**
+    2. Select **Internal** if using Google Workspace, or **External**
+    3. Fill in required fields:
+       - App name: MeetMates
+       - User support email: your-email@college.edu
+       - Developer contact: your-email@college.edu
+    4. Click **Save and Continue**
+  </Step>
+  
+  <Step title="Create OAuth 2.0 Credentials">
+    1. Go to **APIs & Services** > **Credentials**
+    2. Click **Create Credentials** > **OAuth client ID**
+    3. Select **Web application**
+    4. Configure:
+       - **Name**: MeetMates Web Client
+       - **Authorized JavaScript origins**:
+         - `http://localhost:5173` (development)
+         - `https://yourdomain.com` (production)
+       - **Authorized redirect URIs**: (leave empty for this implementation)
+    5. Click **Create**
+    6. Copy the **Client ID**
+  </Step>
+  
+  <Step title="Restrict to College Domain (Optional)">
+    For production, restrict OAuth to your college domain:
+    
+    1. In OAuth consent screen, add your college domain
+    2. Or implement domain validation in your backend:
+    
+    ```javascript backend/routes/auth.js
+    // Validate college email domain
+    const allowedDomains = ['@college.edu', '@university.edu'];
+    const emailDomain = email.substring(email.indexOf('@'));
+    
+    if (!allowedDomains.includes(emailDomain)) {
+      return res.status(403).json({ 
+        error: 'Only college email addresses are allowed' 
+      });
+    }
+    ```
+  </Step>
+</Steps>
+
+---
+
+## MongoDB Setup
+
+<Tabs>
+  <Tab title="Local MongoDB">
+    ### Install MongoDB
+    
+    <CodeGroup>
+    ```bash Ubuntu/Debian
+    sudo apt-get update
+    sudo apt-get install -y mongodb
+    sudo systemctl start mongodb
+    sudo systemctl enable mongodb
+    ```
+    
+    ```bash macOS (Homebrew)
+    brew tap mongodb/brew
+    brew install mongodb-community
+    brew services start mongodb-community
+    ```
+    
+    ```bash Windows
+    # Download MongoDB Community Server from:
+    # https://www.mongodb.com/try/download/community
+    # Install and run as a service
+    ```
+    </CodeGroup>
+    
+    ### Verify Installation
+    
+    ```bash
+    mongosh
+    # Should connect to: mongodb://127.0.0.1:27017
+    ```
+    
+    ### Create Database
+    
+    ```javascript
+    use meetmates
+    db.createCollection('users')
+    ```
+  </Tab>
+  
+  <Tab title="MongoDB Atlas">
+    ### Create Atlas Cluster
+    
+    1. Go to [MongoDB Atlas](https://www.mongodb.com/cloud/atlas)
+    2. Sign up or log in
+    3. Click **Build a Database**
+    4. Choose **FREE** tier (M0)
+    5. Select your cloud provider and region
+    6. Click **Create Cluster**
+    
+    ### Configure Access
+    
+    1. **Database Access**: Create a database user
+       - Username: `meetmates_user`
+       - Password: Generate a secure password
+       - Role: Read and write to any database
+    
+    2. **Network Access**: Add IP address
+       - For development: Add your current IP
+       - For production: Add your server IP
+       - Or: Allow access from anywhere (0.0.0.0/0) - less secure
+    
+    ### Get Connection String
+    
+    1. Click **Connect** on your cluster
+    2. Choose **Connect your application**
+    3. Copy the connection string
+    4. Replace `<password>` with your database user password
+    5. Replace `<dbname>` with `meetmates`
+    
+    ```bash
+    MONGODB_URI=mongodb+srv://meetmates_user:<password>@cluster0.xxxxx.mongodb.net/meetmates?retryWrites=true&w=majority
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Verification
+
+### Test Backend
+
+```bash
+# Check server health
+curl http://localhost:3001
+
+# Test Google login endpoint (should return error without valid token)
+curl -X POST http://localhost:3001/api/auth/google-login \
+  -H "Content-Type: application/json" \
+  -d '{"credential":"invalid"}'
+```
+
+### Test Frontend
+
+1. Open browser to `http://localhost:5173`
+2. Open browser console (F12)
+3. Check for:
+   - No CORS errors
+   - Socket.IO connection logs
+   - Google OAuth button renders
+
+### Test Full Flow
+
+<Steps>
+  <Step title="Authentication">
+    - Click Google login button
+    - Sign in with college email
+    - Should redirect to start page
+  </Step>
+  
+  <Step title="Socket Connection">
+    - Check backend logs for "New user connected"
+    - Check frontend console for Socket.IO connection
+  </Step>
+  
+  <Step title="Matching (requires 2 users)">
+    - Open second browser window (incognito)
+    - Both users click "Start Chat"
+    - Should match and connect
+  </Step>
+  
+  <Step title="WebRTC Video">
+    - Grant camera/microphone permissions
+    - Video streams should appear for both users
+  </Step>
+</Steps>
+
+---
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Port Already in Use">
+    ```bash
+    # Find process using port 3001
+    lsof -i :3001
+    
+    # Kill the process
+    kill -9 <PID>
+    
+    # Or change port in backend/.env
+    PORT=3002
+    ```
+  </Accordion>
+  
+  <Accordion title="MongoDB Connection Failed">
+    ```bash
+    # Check if MongoDB is running
+    sudo systemctl status mongodb
+    
+    # Check connection string format
+    # Local: mongodb://localhost:27017/meetmates
+    # Atlas: mongodb+srv://user:pass@cluster.mongodb.net/meetmates
+    
+    # Test connection
+    mongosh "your-connection-string"
+    ```
+  </Accordion>
+  
+  <Accordion title="CORS Errors">
+    Ensure `CORS_ORIGIN` in backend `.env` includes your frontend URL:
+    ```bash
+    CORS_ORIGIN=http://localhost:5173,https://yourdomain.com
+    ```
+    
+    Check backend logs for "Blocked by CORS" messages.
+  </Accordion>
+  
+  <Accordion title="Google OAuth Not Working">
+    - Verify `VITE_GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_ID` match
+    - Check authorized JavaScript origins in Google Cloud Console
+    - Ensure Google+ API is enabled
+    - Check browser console for OAuth errors
+  </Accordion>
+  
+  <Accordion title="WebRTC Connection Failed">
+    - Grant camera/microphone permissions
+    - Use HTTPS in production (required for WebRTC)
+    - Check firewall settings for UDP ports
+    - Test with STUN/TURN servers if behind NAT
+  </Accordion>
+  
+  <Accordion title="Socket.IO Not Connecting">
+    ```javascript
+    // Enable debug mode in frontend
+    const socket = io(import.meta.env.VITE_BACKEND_URL, {
+      autoConnect: false,
+      debug: true
+    });
+    ```
+    
+    Check:
+    - Backend server is running
+    - `VITE_BACKEND_URL` is correct
+    - No firewall blocking WebSocket connections
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Production Deployment
+
+<CardGroup cols={2}>
+  <Card title="Frontend" icon="react">
+    **Recommended Platforms:**
+    - Vercel
+    - Netlify
+    - Cloudflare Pages
+    
+    **Build Command:**
+    ```bash
+    npm run build
+    ```
+    
+    **Environment Variables:**
+    - `VITE_BACKEND_URL`
+    - `VITE_GOOGLE_CLIENT_ID`
+  </Card>
+  
+  <Card title="Backend" icon="server">
+    **Recommended Platforms:**
+    - Railway
+    - Render
+    - DigitalOcean
+    - AWS EC2
+    
+    **Start Command:**
+    ```bash
+    npm start
+    ```
+    
+    **Environment Variables:**
+    - All variables from `.env` file
+  </Card>
+</CardGroup>
+
+<Warning>
+  **Production Checklist:**
+  - Use HTTPS for both frontend and backend
+  - Set strong `JWT_SECRET` (32+ characters)
+  - Configure MongoDB Atlas with IP whitelist
+  - Restrict Google OAuth to college domain
+  - Enable rate limiting on API endpoints
+  - Set up monitoring and logging
+  - Configure CORS with specific origins only
+  - Use environment-specific OAuth credentials
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="API Reference" icon="code" href="/api/auth/google-login">
+    Explore backend API endpoints and Socket.IO events
+  </Card>
+  <Card title="Environment Variables" icon="gear" href="/development/environment">
+    Advanced configuration options and customization
+  </Card>
+</CardGroup>

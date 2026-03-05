@@ -1,0 +1,434 @@
+---
+title: "Matching & Queue Management"
+description: "Chat partner matching, waiting queue, matching algorithm, and chat initialization"
+---
+
+## Overview
+
+MeetMates uses a sophisticated matching algorithm to pair users based on their video preferences. The system maintains a waiting queue and matches users in real-time as they become available.
+
+## Matching Flow
+
+```
+User A                     Server                      User B
+  |                          |                           |
+  |---findChat(email,video)->|                           |
+  |<-------waiting-----------|                           |
+  |                          |<--findChat(email,video)---|
+  |                          |--------waiting----------->|
+  |                          |                           |
+  |                          | [Matching Algorithm]      |
+  |                          |                           |
+  |<------chatStart----------|--------chatStart--------->|
+  |  {withVideo, partnerId}  |   {withVideo, partnerId}  |
+```
+
+## Events
+
+### `findChat`
+
+**Direction:** Client → Server
+
+**Purpose:** Request to find a chat partner
+
+**Payload:**
+
+```typescript
+type FindChatPayload = {
+  collegeEmail: string;  // User's email (optional if authenticated)
+  withVideo: boolean;    // Whether user wants video chat
+};
+```
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `collegeEmail` | string | No* | User's email address. Not required if socket is authenticated |
+| `withVideo` | boolean | Yes | `true` for video chat, `false` for text-only |
+
+*Note: If socket is authenticated (has `socket.userEmail`), the authenticated email takes precedence.
+
+**Client-side usage:**
+
+```javascript
+// Text-only chat
+socket.emit('findChat', 'user@college.edu', false);
+
+// Video chat
+socket.emit('findChat', 'user@college.edu', true);
+
+// If authenticated, email is optional
+socket.emit('findChat', null, true);
+```
+
+**Server-side behavior:**
+
+1. **Cleanup existing chat**: If user is already in a chat, partner is notified and chat is cleaned up
+2. **Remove from waiting list**: User is removed from queue if already waiting
+3. **Add to waiting list**: User is added to the waiting queue
+4. **Update video preference**: User's video preference is stored
+5. **Emit waiting event**: User receives `waiting` event
+6. **Run matching algorithm**: `matchUsers()` function attempts to pair users
+
+**Code reference:** server.js:146-171
+
+### `waiting`
+
+**Direction:** Server → Client
+
+**Purpose:** Inform client they are in the waiting queue
+
+**Payload:** None
+
+**Emitted when:**
+- User calls `findChat`
+- User's chat partner clicks "Next"
+- User's chat partner disconnects
+
+**Client-side usage:**
+
+```javascript
+socket.on('waiting', () => {
+  console.log('Waiting for a chat partner...');
+  // Show waiting UI
+  document.getElementById('status').textContent = 'Looking for someone to chat with...';
+  showLoadingSpinner();
+});
+```
+
+**Code reference:** server.js:168, 204, 208, 219
+
+### `chatStart`
+
+**Direction:** Server → Client (to both matched users)
+
+**Purpose:** Notify users that a match has been found and chat can begin
+
+**Payload:**
+
+```typescript
+type ChatStartPayload = {
+  withVideo: boolean;   // Whether this chat includes video
+  partnerId: string;    // Socket ID of the chat partner
+};
+```
+
+**Fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `withVideo` | boolean | `true` if either user requested video (see matching algorithm) |
+| `partnerId` | string | Socket ID of the matched partner |
+
+**Client-side usage:**
+
+```javascript
+socket.on('chatStart', ({ withVideo, partnerId }) => {
+  console.log(`Chat started with ${partnerId}, video: ${withVideo}`);
+  
+  // Hide waiting UI
+  hideLoadingSpinner();
+  
+  // Initialize chat interface
+  if (withVideo) {
+    initializeVideoChat(partnerId);
+  } else {
+    initializeTextChat(partnerId);
+  }
+  
+  // Show chat UI
+  document.getElementById('chat-container').style.display = 'block';
+});
+```
+
+**Server-side behavior:**
+
+1. Creates a unique room ID (UUID v4)
+2. Stores chat pair mapping for both users
+3. Joins both sockets to the room
+4. Emits `chatStart` to both users
+5. Logs the match with user emails (if available)
+
+**Code reference:** server.js:377-378
+
+## Matching Algorithm
+
+The server uses a two-phase matching algorithm to pair users:
+
+### Phase 1: Match by Video Preference
+
+**Priority matching**: Users with same video preferences are matched first
+
+```
+Waiting Queue: [User1(video), User2(text), User3(video), User4(text)]
+
+Phase 1 Results:
+- User1 + User3 → Video chat
+- User2 + User4 → Text chat
+```
+
+**Algorithm:**
+
+1. **Video-only matching**: Match users who both want video
+   - Pairs created while 2+ video users exist
+   - Both users must have `withVideo: true`
+
+2. **Text-only matching**: Match users who both want text-only
+   - Pairs created while 2+ text-only users exist
+   - Both users must have `withVideo: false`
+
+**Code reference:** server.js:330-347
+
+### Phase 2: Match Remaining Users
+
+**Fallback matching**: If 2+ users remain in queue, match them regardless of preference
+
+```
+Remaining Queue: [User5(video), User6(text)]
+
+Phase 2 Result:
+- User5 + User6 → Video chat (because User5 wants video)
+```
+
+**Video decision logic:**
+```javascript
+const enableVideo = videoEnabledUsers.has(user1) || videoEnabledUsers.has(user2);
+```
+
+If **either** user requested video, the chat will have video enabled.
+
+**Code reference:** server.js:349-357
+
+### Complete Algorithm Flow
+
+```javascript
+function matchUsers() {
+  // Phase 1: Match by preference
+  matchUsersByVideoPreference();
+  
+  // Phase 2: Match remaining users if 2+ waiting
+  if (waitingUsers.length >= 2) {
+    matchRemainingUsers();
+  }
+}
+```
+
+**Code reference:** server.js:323-328
+
+## Queue Management
+
+### Data Structures
+
+```javascript
+// Global state on server
+let waitingUsers = [];              // Array of socket IDs
+let videoEnabledUsers = new Set();  // Set of socket IDs wanting video
+let chatPairs = {};                 // Mapping: socketId -> { partner, room, video }
+```
+
+### Chat Pair Structure
+
+```typescript
+type ChatPair = {
+  partner: string;   // Socket ID of the partner
+  room: string;      // Unique room ID (UUID)
+  video: boolean;    // Whether video is enabled
+};
+
+// Example:
+chatPairs = {
+  'socket123': { partner: 'socket456', room: 'uuid-abc-123', video: true },
+  'socket456': { partner: 'socket123', room: 'uuid-abc-123', video: true }
+};
+```
+
+**Code reference:** server.js:371-372
+
+## "Next" Event (Re-matching)
+
+### `next`
+
+**Direction:** Client → Server
+
+**Purpose:** End current chat and find a new partner
+
+**Payload:** None
+
+**Client-side usage:**
+
+```javascript
+// User clicks "Next" button to find new partner
+function findNextPartner() {
+  socket.emit('next');
+}
+
+document.getElementById('next-btn').addEventListener('click', findNextPartner);
+```
+
+**Server-side behavior:**
+
+```javascript
+socket.on('next', () => {
+  if (chatPairs[socket.id]) {
+    const partnerId = chatPairs[socket.id].partner;
+    
+    // 1. Notify partner
+    io.to(partnerId).emit('partnerLeft', { partnerId: socket.id });
+    
+    // 2. Clean up chat pair
+    cleanupChatPair(socket.id);
+    
+    // 3. Add both users back to waiting queue
+    waitingUsers.push(socket.id);
+    waitingUsers.push(partnerId);
+    
+    // 4. Emit waiting to both
+    socket.emit('waiting');
+    io.to(partnerId).emit('waiting');
+    
+    // 5. Attempt re-matching after 100ms
+    setTimeout(() => matchUsers(), 100);
+  }
+});
+```
+
+**Flow:**
+
+```
+User A                     Server                      User B
+  |                          |                           |
+  |--------next------------>|                           |
+  |<------waiting-----------|-------partnerLeft-------->|
+  |                          |--------waiting----------->|
+  |                          |                           |
+  |                          | [Re-match both users]     |
+```
+
+**Code reference:** server.js:185-222
+
+## Complete Matching Example
+
+```javascript
+class ChatMatcher {
+  constructor(socket) {
+    this.socket = socket;
+    this.currentPartner = null;
+    this.setupListeners();
+  }
+  
+  setupListeners() {
+    // Waiting for match
+    this.socket.on('waiting', () => {
+      console.log('Looking for a chat partner...');
+      this.showWaitingUI();
+    });
+    
+    // Match found!
+    this.socket.on('chatStart', ({ withVideo, partnerId }) => {
+      console.log(`Matched with ${partnerId}`);
+      this.currentPartner = partnerId;
+      this.hideWaitingUI();
+      
+      if (withVideo) {
+        this.startVideoChat();
+      } else {
+        this.startTextChat();
+      }
+    });
+    
+    // Partner left
+    this.socket.on('partnerLeft', ({ partnerId }) => {
+      console.log(`Partner ${partnerId} left the chat`);
+      this.currentPartner = null;
+      this.showPartnerLeftMessage();
+    });
+  }
+  
+  findChat(email, withVideo = false) {
+    this.socket.emit('findChat', email, withVideo);
+  }
+  
+  findNextPartner() {
+    if (this.currentPartner) {
+      this.socket.emit('next');
+      this.currentPartner = null;
+    }
+  }
+  
+  showWaitingUI() {
+    document.getElementById('waiting-screen').style.display = 'block';
+    document.getElementById('chat-screen').style.display = 'none';
+  }
+  
+  hideWaitingUI() {
+    document.getElementById('waiting-screen').style.display = 'none';
+    document.getElementById('chat-screen').style.display = 'block';
+  }
+  
+  startVideoChat() {
+    document.getElementById('video-container').style.display = 'block';
+    // Initialize WebRTC (see WebRTC documentation)
+  }
+  
+  startTextChat() {
+    document.getElementById('video-container').style.display = 'none';
+  }
+  
+  showPartnerLeftMessage() {
+    alert('Your chat partner has left. Looking for a new partner...');
+  }
+}
+
+// Usage
+const matcher = new ChatMatcher(socket);
+
+// Start looking for text chat
+document.getElementById('find-text-chat').addEventListener('click', () => {
+  matcher.findChat('user@college.edu', false);
+});
+
+// Start looking for video chat
+document.getElementById('find-video-chat').addEventListener('click', () => {
+  matcher.findChat('user@college.edu', true);
+});
+
+// Find next partner
+document.getElementById('next-btn').addEventListener('click', () => {
+  matcher.findNextPartner();
+});
+```
+
+## Edge Cases
+
+### User Already in Chat
+
+If a user calls `findChat` while already in a chat:
+1. Current partner is notified via `partnerLeft`
+2. Chat pair is cleaned up
+3. User is added to waiting queue
+4. User receives `waiting` event
+5. Matching algorithm runs
+
+### User Already Waiting
+
+If a user calls `findChat` while already in the waiting queue:
+1. User is removed from current position in queue
+2. User is re-added to end of queue
+3. User's video preference is updated
+4. User receives `waiting` event
+
+### Socket Disconnection During Matching
+
+If a socket becomes invalid during `createChatPair`:
+1. Valid socket (if any) is added back to waiting queue
+2. Pair creation is aborted
+3. Matching continues for remaining users
+
+**Code reference:** server.js:359-367
+
+## Related Events
+
+- [Connection](/api/socket/connection) - Must be connected before calling `findChat`
+- [partnerLeft](/api/socket/messaging#partnerleft) - Received when partner leaves or disconnects
+- [ready-to-connect](/api/socket/webrtc#ready-to-connect) - Next step after `chatStart` for video chats

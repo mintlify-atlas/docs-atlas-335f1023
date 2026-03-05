@@ -1,0 +1,112 @@
+---
+title: "Signup"
+api: "POST /api/auth/signup"
+description: "Create a new user account with email and password"
+---
+
+This endpoint creates a new user account using email and password authentication. Only users with `@adgitmdelhi.ac.in` email addresses or valid user IDs are allowed to sign up.
+
+## Request Body
+
+<ParamField body="email" type="string" required>
+  User's email address. Must be an `@adgitmdelhi.ac.in` email or a valid user ID (5+ alphanumeric characters)
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  User's password. Must be at least 6 characters long
+</ParamField>
+
+## Request Example
+
+```bash
+curl -X POST https://api.meetmates.com/api/auth/signup \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "student@adgitmdelhi.ac.in",
+    "password": "securepassword123"
+  }'
+```
+
+```json
+{
+  "email": "student@adgitmdelhi.ac.in",
+  "password": "securepassword123"
+}
+```
+
+## Response
+
+<ResponseField name="msg" type="string">
+  Success or error message
+</ResponseField>
+
+## Response Example
+
+```json 201 - Success
+{
+  "msg": "Signup successful."
+}
+```
+
+## Error Responses
+
+<ResponseField name="msg" type="string">
+  Error message describing what went wrong
+</ResponseField>
+
+<ResponseField name="error" type="string">
+  System error message (for 500 errors)
+</ResponseField>
+
+### Error Codes
+
+<ResponseExample>
+```json 400 - Invalid Email
+{
+  "msg": "Signup is only allowed with an @adgitmdelhi.ac.in email or a valid user ID."
+}
+```
+
+```json 400 - Short Password
+{
+  "msg": "Password must be at least 6 characters long."
+}
+```
+
+```json 400 - User Exists
+{
+  "msg": "User already exists."
+}
+```
+
+```json 500 - Server Error
+{
+  "error": "Internal server error."
+}
+```
+</ResponseExample>
+
+## Authentication
+
+This endpoint does not require authentication. It is used to create a new account.
+
+## Validation Rules
+
+### Email Validation
+The email must meet one of these criteria:
+- End with `@adgitmdelhi.ac.in`
+- Be a valid user ID (at least 5 alphanumeric characters)
+
+Emails are normalized (trimmed and converted to lowercase) before validation.
+
+### Password Validation
+- Minimum length: 6 characters
+- No maximum length or complexity requirements
+
+## Notes
+
+- Passwords are hashed before storage using bcrypt
+- Email addresses are stored in lowercase
+- Duplicate emails are not allowed
+- After successful signup, users must use the `/api/auth/login` endpoint to obtain an authentication token
+- The password hashing happens automatically via the User model's pre-save hook

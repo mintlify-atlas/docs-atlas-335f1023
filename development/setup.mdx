@@ -1,0 +1,341 @@
+---
+title: Local Development Setup
+description: Complete guide to setting up MeetMates for local development
+---
+
+## Prerequisites
+
+Before setting up MeetMates locally, ensure you have the following installed:
+
+- **Node.js** (v16 or higher recommended)
+- **npm** (comes with Node.js) or **yarn**
+- **MongoDB** (v6.15.0 or higher)
+  - Local installation, or
+  - MongoDB Atlas account (free tier available)
+- **Git** for version control
+- **Google Cloud Console** account (for OAuth)
+
+## Clone the Repository
+
+First, clone the MeetMates repository:
+
+```bash
+git clone https://github.com/your-username/meetmates.git
+cd meetmates
+```
+
+The project structure consists of two main directories:
+
+```
+meetmates/
+├── frontend/          # React + Vite frontend application
+├── backend/           # Node.js + Express backend server
+└── README.md
+```
+
+## Backend Setup
+
+### 1. Install Backend Dependencies
+
+Navigate to the backend directory and install dependencies:
+
+```bash
+cd backend
+npm install
+```
+
+### 2. Configure Environment Variables
+
+Create a `.env` file in the `backend/` directory:
+
+```bash
+touch .env
+```
+
+Add the following environment variables (see [Environment Configuration](/development/environment) for detailed explanations):
+
+```env
+MONGODB_URI=mongodb://localhost:27017/meetmates
+JWT_SECRET=your-super-secret-jwt-key-change-this
+CORS_ORIGIN=http://localhost:5173,https://www.meetmates.space
+PORT=3001
+GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
+```
+
+### 3. Set Up MongoDB
+
+#### Option A: Local MongoDB
+
+If running MongoDB locally:
+
+```bash
+# Start MongoDB service
+mongod --dbpath /path/to/your/data/directory
+```
+
+#### Option B: MongoDB Atlas
+
+1. Create a free cluster at [MongoDB Atlas](https://www.mongodb.com/cloud/atlas)
+2. Get your connection string
+3. Replace `MONGODB_URI` in `.env` with your Atlas connection string:
+
+```env
+MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/meetmates?retryWrites=true&w=majority
+```
+
+### 4. Set Up Google OAuth
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project or select an existing one
+3. Enable the **Google+ API**
+4. Go to **Credentials** → **Create Credentials** → **OAuth 2.0 Client ID**
+5. Configure the OAuth consent screen
+6. Add authorized JavaScript origins:
+   - `http://localhost:5173` (for development)
+   - Your production domain (if applicable)
+7. Copy the **Client ID** and add it to both frontend and backend `.env` files
+
+### 5. Start the Backend Server
+
+```bash
+npm start
+```
+
+The backend server should now be running on `http://localhost:3001`. You should see:
+
+```
+Server running on port 3001
+MongoDB connected
+```
+
+## Frontend Setup
+
+### 1. Install Frontend Dependencies
+
+Open a new terminal window and navigate to the frontend directory:
+
+```bash
+cd frontend
+npm install
+```
+
+### 2. Configure Environment Variables
+
+Create a `.env` file in the `frontend/` directory:
+
+```bash
+touch .env
+```
+
+Add the following environment variables:
+
+```env
+VITE_BACKEND_URL=http://localhost:3001
+VITE_GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
+```
+
+**Important:** Make sure `VITE_GOOGLE_CLIENT_ID` matches the `GOOGLE_CLIENT_ID` in the backend `.env`.
+
+### 3. Start the Frontend Development Server
+
+```bash
+npm run dev
+```
+
+The frontend should now be running on `http://localhost:5173`. Open this URL in your browser.
+
+## Verify Installation
+
+### Check Backend Health
+
+1. Backend server logs show "MongoDB connected"
+2. Backend is accessible at `http://localhost:3001`
+3. Test the API endpoint:
+
+```bash
+curl http://localhost:3001/api/auth/google-login
+```
+
+### Check Frontend
+
+1. Open `http://localhost:5173` in your browser
+2. You should see the MeetMates login page
+3. Browser console should show Socket.IO connection established
+
+### Test Authentication Flow
+
+1. Click "Continue with Google"
+2. Select your Google account
+3. You should be redirected to the main application
+4. Check browser DevTools Network tab for successful API calls
+
+## Development Workflow
+
+### Running Both Servers
+
+You'll need two terminal windows/tabs:
+
+**Terminal 1 (Backend):**
+```bash
+cd backend
+npm start
+```
+
+**Terminal 2 (Frontend):**
+```bash
+cd frontend
+npm run dev
+```
+
+### Hot Reloading
+
+- **Frontend:** Vite provides automatic hot module replacement (HMR)
+- **Backend:** You may want to install `nodemon` for auto-restart:
+
+```bash
+cd backend
+npm install -g nodemon
+nodemon server.js
+```
+
+Or add to `backend/package.json`:
+
+```json
+"scripts": {
+  "start": "node server.js",
+  "dev": "nodemon server.js"
+}
+```
+
+Then run: `npm run dev`
+
+## Common Issues
+
+### MongoDB Connection Failed
+
+**Error:** `MongoDB connection error`
+
+**Solution:**
+- Verify MongoDB is running: `mongod --version`
+- Check `MONGODB_URI` in `.env` is correct
+- For Atlas, ensure your IP is whitelisted
+
+### CORS Errors
+
+**Error:** `Blocked by CORS`
+
+**Solution:**
+- Verify `CORS_ORIGIN` in backend `.env` includes `http://localhost:5173`
+- Check that frontend is running on the exact port specified
+
+### Google OAuth Not Working
+
+**Error:** `Invalid Google token` or OAuth popup doesn't appear
+
+**Solution:**
+- Verify `VITE_GOOGLE_CLIENT_ID` in frontend `.env` matches Google Console
+- Check authorized JavaScript origins in Google Console
+- Clear browser cache and cookies
+
+### Port Already in Use
+
+**Error:** `EADDRINUSE: address already in use :::3001`
+
+**Solution:**
+```bash
+# Find and kill the process using the port
+lsof -i :3001
+kill -9 <PID>
+
+# Or use a different port in backend/.env
+PORT=3002
+```
+
+### Socket.IO Connection Failed
+
+**Error:** Console shows Socket.IO connection errors
+
+**Solution:**
+- Ensure backend is running and accessible
+- Check `VITE_BACKEND_URL` in frontend `.env`
+- Verify no firewall is blocking WebSocket connections
+
+## Next Steps
+
+- Review the [Environment Variables](/development/environment) documentation
+- Understand the [System Architecture](/development/architecture)
+- Check the [Authentication API](/api/auth/google-login) for available endpoints
+- Read about [WebRTC Video Chat](/features/video-chat) for video functionality
+
+## Development Tools
+
+### Recommended VS Code Extensions
+
+- **ESLint** - JavaScript linting
+- **Prettier** - Code formatting
+- **ES7+ React/Redux/React-Native snippets** - React code snippets
+- **Thunder Client** or **REST Client** - API testing
+- **MongoDB for VS Code** - MongoDB integration
+
+### Debugging
+
+#### Backend Debugging
+
+Add `debugger` statements or use VS Code's built-in Node debugger:
+
+```json
+// .vscode/launch.json
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Debug Backend",
+      "program": "${workspaceFolder}/backend/server.js",
+      "envFile": "${workspaceFolder}/backend/.env"
+    }
+  ]
+}
+```
+
+#### Frontend Debugging
+
+Use browser DevTools:
+- **Console:** View logs and errors
+- **Network:** Monitor API calls and WebSocket connections
+- **Application:** Inspect localStorage, session storage, and cookies
+- **React DevTools:** Install browser extension for React debugging
+
+## Testing
+
+### Manual Testing Checklist
+
+- [ ] User can sign up with college email
+- [ ] User can log in with Google OAuth
+- [ ] User can log in with ID card image
+- [ ] Socket.IO connection establishes successfully
+- [ ] User can start a chat (text-only)
+- [ ] User can start a video chat
+- [ ] WebRTC connection establishes between peers
+- [ ] Messages are sent and received in real-time
+- [ ] "Next" button connects to a new partner
+- [ ] User disconnection is handled gracefully
+- [ ] Online user count updates correctly
+
+### API Testing with cURL
+
+```bash
+# Test Google Login endpoint
+curl -X POST http://localhost:3001/api/auth/google-login \
+  -H "Content-Type: application/json" \
+  -d '{"credential": "your-google-token"}'
+
+# Test protected route
+curl http://localhost:3001/api/verify-token \
+  -H "Authorization: Bearer your-jwt-token"
+
+# Test profile endpoint
+curl http://localhost:3001/api/profile \
+  -H "Authorization: Bearer your-jwt-token"
+```

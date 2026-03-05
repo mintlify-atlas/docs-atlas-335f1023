@@ -1,0 +1,285 @@
+---
+title: "Connection & Authentication"
+description: "Socket.IO connection setup, authentication middleware, and disconnect handling"
+---
+
+## Overview
+
+The MeetMates Socket.IO server handles real-time communication between users. This page covers the connection lifecycle, authentication, and disconnect handling.
+
+## Connection Setup
+
+### Establishing a Connection
+
+**Direction:** Client → Server
+
+Clients connect to the Socket.IO server using the standard Socket.IO client library. Authentication is optional but recommended for full feature access.
+
+```javascript
+import io from 'socket.io-client';
+
+const socket = io('http://localhost:3001', {
+  auth: {
+    token: 'your-jwt-token-here'
+  },
+  // Or using headers:
+  extraHeaders: {
+    authorization: 'Bearer your-jwt-token-here'
+  }
+});
+
+socket.on('connect', () => {
+  console.log('Connected:', socket.id);
+});
+```
+
+**CORS Allowed Origins:**
+- `http://localhost:5173` (development)
+- `https://www.meetmates.space` (production)
+
+## Authentication
+
+### Socket Authentication Middleware
+
+Authentication is handled via JWT tokens passed during the Socket.IO handshake.
+
+**Token Location:**
+- `socket.handshake.auth.token` (recommended)
+- `socket.handshake.headers.authorization` (alternative)
+
+**Token Format:**
+- Bearer token: `Bearer <jwt-token>`
+- Direct token: `<jwt-token>`
+
+**Authentication Flow:**
+
+```javascript
+// Client-side: Connect with authentication
+const token = localStorage.getItem('authToken');
+
+const socket = io('http://localhost:3001', {
+  auth: {
+    token: token
+  }
+});
+
+// On successful authentication, server stores:
+// - socket.userId (from JWT payload)
+// - socket.userEmail (from JWT payload)
+// - socket.isGoogleUser (from JWT payload)
+```
+
+**Authentication Data Structure (Server-side):**
+
+```javascript
+// Stored in authenticatedUsers Map:
+{
+  userId: decoded.userId,      // MongoDB user ID
+  email: decoded.email,        // User email
+  isGoogleUser: decoded.isGoogleUser  // OAuth flag
+}
+```
+
+**Authentication Errors:**
+
+If authentication fails, the connection will be rejected:
+
+```javascript
+socket.on('connect_error', (error) => {
+  console.error('Connection failed:', error.message);
+  // Possible errors:
+  // - "Authentication token required"
+  // - "Authentication failed"
+});
+```
+
+**Note:** Authentication middleware is currently optional (line 108 in server.js is commented out). When enabled via `io.use(socketAuthMiddleware)`, all connections require valid JWT tokens.
+
+## Connection Events
+
+### `connection`
+
+**Direction:** Server-side event
+
+**Emitted when:** A client successfully connects to the Socket.IO server
+
+**Server-side handler:**
+
+```javascript
+io.on('connection', (socket) => {
+  // Connection established
+  // socket.id is the unique socket identifier
+  // socket.userId, socket.userEmail available if authenticated
+});
+```
+
+**Side effects:**
+1. Increments `onlineUsers` counter
+2. Stores authenticated user info if JWT token provided
+3. Broadcasts updated online count to all clients via `onlineUsers` event
+4. Logs connection: `"New user connected: {socketId} Total online users: {count}"`
+
+### `onlineUsers`
+
+**Direction:** Server → Client (broadcast)
+
+**Emitted when:** 
+- A user connects
+- A user disconnects
+
+**Payload:**
+
+```typescript
+type OnlineUsersPayload = number; // Total count of connected users
+```
+
+**Client-side usage:**
+
+```javascript
+socket.on('onlineUsers', (count) => {
+  console.log(`Currently online: ${count} users`);
+  // Update UI with online user count
+  document.getElementById('online-count').textContent = count;
+});
+```
+
+## Disconnection
+
+### `disconnect`
+
+**Direction:** Client → Server (automatic)
+
+**Triggered when:**
+- User closes browser/tab
+- Network connection lost
+- Client explicitly calls `socket.disconnect()`
+- Server terminates connection
+
+**Server-side cleanup actions:**
+
+```javascript
+socket.on('disconnect', () => {
+  // 1. Decrement online users count
+  // 2. Remove from authenticated users map
+  // 3. Remove from waiting queue
+  // 4. Remove video preference
+  // 5. Remove WebRTC ready status
+  // 6. Notify chat partner (if in chat)
+  // 7. Clean up chat pair data
+  // 8. Broadcast updated online count
+});
+```
+
+**Client-side handling:**
+
+```javascript
+socket.on('disconnect', (reason) => {
+  console.log('Disconnected:', reason);
+  
+  // Reasons include:
+  // - "io server disconnect" (server terminated)
+  // - "io client disconnect" (client called disconnect())
+  // - "ping timeout" (connection lost)
+  // - "transport close" (network error)
+  // - "transport error" (connection error)
+});
+
+// Handle reconnection
+socket.on('reconnect', (attemptNumber) => {
+  console.log('Reconnected after', attemptNumber, 'attempts');
+});
+```
+
+**Cleanup performed:**
+
+| Resource | Action |
+|----------|--------|
+| `onlineUsers` | Decremented (min: 0) |
+| `authenticatedUsers` | Removed from Map |
+| `waitingUsers` | Removed from array |
+| `videoEnabledUsers` | Removed from Set |
+| `rtcReadyUsers` | Removed from Set |
+| `chatPairs` | Cleaned up for user and partner |
+| Partner notification | `partnerLeft` event sent |
+
+**Related events:**
+- `partnerLeft` - Sent to chat partner when user disconnects during active chat
+
+## Complete Connection Lifecycle Example
+
+```javascript
+import io from 'socket.io-client';
+
+class MeetMatesSocket {
+  constructor(authToken) {
+    this.socket = io('http://localhost:3001', {
+      auth: { token: authToken },
+      reconnection: true,
+      reconnectionDelay: 1000,
+      reconnectionAttempts: 5
+    });
+    
+    this.setupListeners();
+  }
+  
+  setupListeners() {
+    // Connection successful
+    this.socket.on('connect', () => {
+      console.log('Connected with ID:', this.socket.id);
+    });
+    
+    // Connection failed
+    this.socket.on('connect_error', (error) => {
+      console.error('Connection error:', error.message);
+      if (error.message === 'Authentication token required') {
+        // Redirect to login
+      }
+    });
+    
+    // Track online users
+    this.socket.on('onlineUsers', (count) => {
+      console.log(`${count} users online`);
+    });
+    
+    // Disconnected
+    this.socket.on('disconnect', (reason) => {
+      console.log('Disconnected:', reason);
+      if (reason === 'io server disconnect') {
+        // Server forced disconnect - may need to reconnect manually
+        this.socket.connect();
+      }
+    });
+    
+    // Reconnecting
+    this.socket.on('reconnect_attempt', (attemptNumber) => {
+      console.log(`Reconnection attempt ${attemptNumber}`);
+    });
+    
+    // Reconnected successfully
+    this.socket.on('reconnect', (attemptNumber) => {
+      console.log(`Reconnected after ${attemptNumber} attempts`);
+    });
+  }
+  
+  disconnect() {
+    this.socket.disconnect();
+  }
+}
+
+// Usage
+const authToken = localStorage.getItem('authToken');
+const meetmates = new MeetMatesSocket(authToken);
+```
+
+## Security Considerations
+
+1. **JWT Token Security**: Store tokens securely (HttpOnly cookies or secure localStorage)
+2. **Token Expiration**: Handle token expiration gracefully with refresh logic
+3. **CORS Configuration**: Only allowed origins can connect
+4. **Socket ID Exposure**: Socket IDs are shared with chat partners (not sensitive)
+5. **Rate Limiting**: Consider implementing rate limiting for production use
+
+## Related Events
+
+- [findChat](/api/socket/matching#findchat) - Start looking for a chat partner after connection
+- [partnerLeft](/api/socket/messaging#partnerleft) - Sent when disconnect occurs during active chat

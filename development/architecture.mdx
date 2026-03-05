@@ -1,0 +1,682 @@
+---
+title: System Architecture
+description: Understanding MeetMates' technical architecture, components, and data flow
+---
+
+## Overview
+
+MeetMates is a college-exclusive video chat platform built with a modern, full-stack architecture. The system enables random peer-to-peer video connections between authenticated college students using WebRTC for media streaming and Socket.IO for real-time signaling.
+
+## High-Level Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         Client Layer                            │
+│  ┌────────────────────────────────────────────────────────┐    │
+│  │  React 19 + Vite Frontend (Port 5173)                  │    │
+│  │  - React Components (Login, ChatRoom, VideoChat)       │    │
+│  │  - Socket.IO Client                                     │    │
+│  │  - WebRTC Peer Connection                              │    │
+│  │  - Google OAuth Integration                            │    │
+│  └────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+              HTTP/HTTPS + WebSocket (Socket.IO)
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                         Server Layer                            │
+│  ┌────────────────────────────────────────────────────────┐    │
+│  │  Node.js + Express Backend (Port 3001)                 │    │
+│  │  ┌──────────────────────────────────────────────────┐  │    │
+│  │  │ REST API Routes                                   │  │    │
+│  │  │ - /api/auth/* (Authentication endpoints)         │  │    │
+│  │  │ - /api/profile (User profile)                    │  │    │
+│  │  │ - /api/verify-token (Token validation)           │  │    │
+│  │  └──────────────────────────────────────────────────┘  │    │
+│  │  ┌──────────────────────────────────────────────────┐  │    │
+│  │  │ Socket.IO Server                                  │  │    │
+│  │  │ - Connection management                          │  │    │
+│  │  │ - User matching algorithm                        │  │    │
+│  │  │ - WebRTC signaling (offer/answer/ICE)           │  │    │
+│  │  │ - Chat message relay                             │  │    │
+│  │  └──────────────────────────────────────────────────┘  │    │
+│  │  ┌──────────────────────────────────────────────────┐  │    │
+│  │  │ Authentication Middleware                         │  │    │
+│  │  │ - JWT verification                                │  │    │
+│  │  │ - Google OAuth validation                         │  │    │
+│  │  └──────────────────────────────────────────────────┘  │    │
+│  └────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      Database Layer                             │
+│  ┌────────────────────────────────────────────────────────┐    │
+│  │  MongoDB (Mongoose ORM)                                │    │
+│  │  - Users Collection (authentication, profiles)         │    │
+│  │  - Sessions (managed by JWT, not stored)              │    │
+│  └────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────┘
+                              
+┌─────────────────────────────────────────────────────────────────┐
+│                    External Services                            │
+│  - Google OAuth 2.0 (User authentication)                      │
+│  - Tesseract.js (ID card OCR - optional auth method)           │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│               Peer-to-Peer Communication                        │
+│  WebRTC Direct Connection (after signaling via Socket.IO)      │
+│  Client A ◄──────────── Media Stream ──────────────► Client B  │
+│  (Video, Audio, Data)                                           │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Tech Stack
+
+### Frontend Technologies
+
+| Technology | Version | Purpose |
+|------------|---------|----------|
+| **React** | 19.0.0 | UI framework for building interactive components |
+| **Vite** | 6.2.3 | Build tool and development server with HMR |
+| **Socket.IO Client** | 4.8.1 | Real-time bidirectional event-based communication |
+| **Axios** | 1.8.4 | HTTP client for REST API calls |
+| **Tailwind CSS** | 4.0.13 | Utility-first CSS framework for styling |
+| **Lucide React** | 0.525.0 | Icon library for UI elements |
+| **Firebase** | 11.5.0 | Additional services integration (optional) |
+
+### Backend Technologies
+
+| Technology | Version | Purpose |
+|------------|---------|----------|
+| **Node.js** | - | JavaScript runtime environment |
+| **Express** | 4.21.2 | Web application framework for REST APIs |
+| **Socket.IO** | 4.8.1 | WebSocket server for real-time communication |
+| **MongoDB** | 6.15.0 | NoSQL database for user data |
+| **Mongoose** | 8.13.2 | MongoDB ODM for data modeling |
+| **JWT** | 9.0.2 | JSON Web Tokens for authentication |
+| **bcrypt** | 6.0.0 | Password hashing |
+| **Google Auth Library** | 10.1.0 | Google OAuth 2.0 client verification |
+| **Tesseract.js** | 6.0.1 | OCR for ID card authentication |
+| **Multer** | 1.4.5-lts.2 | File upload middleware |
+| **UUID** | 11.1.0 | Unique identifier generation |
+| **CORS** | 2.8.5 | Cross-Origin Resource Sharing middleware |
+
+### Development Tools
+
+- **ESLint** - Code linting and quality enforcement
+- **Nodemon** - Auto-restart for backend development
+- **Dotenv** - Environment variable management
+
+## Directory Structure
+
+### Backend Structure
+
+```
+backend/
+├── server.js              # Main server file - Express + Socket.IO setup
+├── package.json           # Dependencies and scripts
+├── .env                   # Environment variables (not in repo)
+├── .gitignore            # Git ignore rules
+├── eng.traineddata       # Tesseract OCR training data
+├── config/
+│   └── auth.js           # Email validation utilities
+├── middleware/
+│   └── auth.js           # JWT authentication middleware
+├── models/
+│   └── User.js           # Mongoose User schema
+├── routes/
+│   ├── auth.js           # Authentication routes (login, signup, OAuth)
+│   └── imageAuth.js      # ID card OCR authentication
+└── uploads/              # Temporary storage for uploaded images
+```
+
+### Frontend Structure
+
+```
+frontend/
+├── index.html            # HTML entry point
+├── package.json          # Dependencies and scripts
+├── vite.config.js        # Vite configuration
+├── .env                  # Environment variables (not in repo)
+├── .gitignore           # Git ignore rules
+├── eslint.config.js     # ESLint configuration
+├── public/              # Static assets
+├── src/
+│   ├── main.jsx         # React entry point
+│   ├── App.jsx          # Root React component
+│   ├── App.css          # Global styles
+│   ├── index.css        # Tailwind imports
+│   ├── Socket.jsx       # Socket.IO client instance
+│   ├── googleAuth.js    # Google Sign-In initialization
+│   ├── assets/          # Images, icons
+│   └── components/
+│       ├── Login.jsx           # Authentication UI
+│       ├── HomePage.jsx        # Main dashboard
+│       ├── StartingPage.jsx    # Initial landing page
+│       ├── WaitingRoom.jsx     # Waiting for match UI
+│       ├── ChatRoom.jsx        # Text chat interface
+│       ├── VideoChat.jsx       # WebRTC video chat
+│       └── Navbar.jsx          # Navigation bar
+```
+
+## Core Components
+
+### 1. Authentication System
+
+MeetMates implements multiple authentication methods:
+
+#### A. Google OAuth 2.0 (Primary)
+
+**Flow:**
+1. User clicks "Continue with Google" button
+2. Frontend initializes Google Sign-In (`googleAuth.js`)
+3. User selects Google account
+4. Google returns credential token to frontend
+5. Frontend sends credential to backend `/api/auth/google-login`
+6. Backend verifies token with Google OAuth2Client
+7. Backend checks if user exists in database:
+   - **New user:** Create user document with Google profile data
+   - **Existing user:** Update Google-related fields if needed
+8. Backend generates JWT token with user ID and email
+9. Frontend stores JWT in localStorage
+10. Frontend includes JWT in Authorization header for protected routes
+
+**Files involved:**
+- Frontend: `src/components/Login.jsx:8-60`, `src/googleAuth.js`
+- Backend: `routes/auth.js:94-194`
+
+#### B. Email/Password Authentication
+
+**Flow:**
+1. User enters college email (`@adgitmdelhi.ac.in`) and password
+2. Frontend validates email domain
+3. Frontend sends credentials to `/api/auth/signup` or `/api/auth/login`
+4. Backend validates email format and domain
+5. For signup: Hash password with bcrypt, create user
+6. For login: Compare hashed password, generate JWT
+7. Frontend stores JWT and redirects to main app
+
+**Files involved:**
+- Frontend: `src/components/Login.jsx:62-120`
+- Backend: `routes/auth.js:21-92`
+- Model: `models/User.js:64-77` (password hashing)
+
+#### C. ID Card OCR Authentication
+
+**Flow:**
+1. User uploads photo of college ID card
+2. Frontend sends image to `/api/auth/image-login`
+3. Backend uses Multer to save image temporarily
+4. Tesseract.js extracts text from image
+5. Backend parses enrollment number (11-digit) and name
+6. Backend generates user ID: `firstname.lastname[first3digits]@adgitmdelhi.ac.in`
+7. Backend returns generated credentials
+8. User can use these credentials for email/password login
+
+**Files involved:**
+- Frontend: `src/components/Login.jsx:122-170`
+- Backend: `routes/imageAuth.js`
+
+### 2. User Matching System
+
+The backend implements an intelligent matching algorithm in `server.js:323-386`.
+
+**Data Structures:**
+```javascript
+let waitingUsers = [];              // Array of socket IDs waiting for match
+let videoEnabledUsers = new Set();  // Set of users who want video chat
+let chatPairs = {};                 // Map of socketId -> {partner, room, video}
+let rtcReadyUsers = new Set();      // Users ready for WebRTC connection
+let authenticatedUsers = new Map(); // socketId -> user info
+let onlineUsers = 0;                // Total connected users
+```
+
+**Matching Algorithm:**
+
+1. **User requests chat** (`findChat` event):
+   - Add user to `waitingUsers` array
+   - Add to `videoEnabledUsers` set if video requested
+   - Emit "waiting" state to user
+
+2. **Preference-based matching** (`matchUsersByVideoPreference`):
+   - Match video users with video users
+   - Match text-only users with text-only users
+   - Creates optimal pairs based on preferences
+
+3. **Cross-preference matching** (`matchRemainingUsers`):
+   - If video and text-only users remain unpaired
+   - Match them together (video enabled for the pair)
+
+4. **Create chat pair** (`createChatPair`):
+   - Generate unique room ID (UUID)
+   - Join both users to Socket.IO room
+   - Store pair in `chatPairs` object
+   - Emit "chatStart" event to both users
+   - Log match with user emails (if authenticated)
+
+**Files involved:**
+- Backend: `server.js:119-386`
+
+### 3. WebRTC Video Communication
+
+WebRTC enables peer-to-peer video/audio streaming between matched users.
+
+**Signaling Flow:**
+
+```
+User A                    Server                    User B
+  │                         │                         │
+  ├─ chatStart ────────────►│◄────────── chatStart ──┤
+  │                         │                         │
+  ├─ ready-to-connect ─────►│◄─── ready-to-connect ──┤
+  │                         │                         │
+  │◄─ create-offer ─────────┤ (Server determines      │
+  │                         │  who creates offer)     │
+  │                         │                         │
+  ├─ webrtc-offer ─────────►├────────────────────────►│
+  │                         │                         │
+  │◄─────────────────────── ├◄────── webrtc-answer ──┤
+  │                         │                         │
+  ├─ ice-candidate ────────►├────────────────────────►│
+  │◄─────────────────────── ├◄───── ice-candidate ───┤
+  │                         │                         │
+  ◄═══════════════════════════════════════════════════►
+          Direct P2P Connection Established
+         (Video, Audio, Data Channels)
+```
+
+**Backend WebRTC Signaling** (`server.js:224-267`):
+
+- **ready-to-connect:** Users signal they're ready to establish WebRTC
+- **create-offer:** Server tells lower socket ID to create offer (prevents race conditions)
+- **webrtc-offer:** Relay SDP offer from User A to User B
+- **webrtc-answer:** Relay SDP answer from User B to User A
+- **ice-candidate:** Relay ICE candidates between peers
+
+**Frontend WebRTC Implementation** (`components/VideoChat.jsx`):
+
+1. Create RTCPeerConnection
+2. Add local media stream tracks
+3. Handle ICE candidate generation
+4. Create and send offer/answer
+5. Set remote description when received
+6. Display remote stream when received
+
+**Files involved:**
+- Backend: `server.js:224-267`
+- Frontend: `src/components/VideoChat.jsx`
+
+### 4. Real-Time Messaging
+
+Text chat works alongside video using Socket.IO.
+
+**Message Flow:**
+1. User types message in ChatRoom component
+2. Frontend emits "sendMessage" event with message text
+3. Backend receives message from sender's socket
+4. Backend looks up chat pair to find partner
+5. Backend emits "message" event to entire room (both users)
+6. Both clients receive message with:
+   - `sender`: Socket ID
+   - `text`: Message content
+   - `senderEmail`: User's email (if authenticated)
+   - `timestamp`: ISO timestamp
+7. Frontend renders message in chat UI
+
+**Files involved:**
+- Backend: `server.js:173-183`
+- Frontend: `src/components/ChatRoom.jsx`
+
+### 5. Connection Lifecycle
+
+**Connection:**
+```javascript
+// server.js:128-143
+io.on("connection", (socket) => {
+  onlineUsers++;
+  console.log("New user connected:", socket.id);
+  
+  // Store authenticated user info
+  if (socket.userId) {
+    authenticatedUsers.set(socket.id, {
+      userId: socket.userId,
+      email: socket.userEmail,
+      isGoogleUser: socket.isGoogleUser
+    });
+  }
+  
+  // Broadcast updated count
+  io.emit("onlineUsers", onlineUsers);
+});
+```
+
+**Disconnection:**
+```javascript
+// server.js:269-290
+socket.on("disconnect", () => {
+  onlineUsers--;
+  
+  // Clean up user data
+  authenticatedUsers.delete(socket.id);
+  waitingUsers = waitingUsers.filter(id => id !== socket.id);
+  videoEnabledUsers.delete(socket.id);
+  rtcReadyUsers.delete(socket.id);
+  
+  // Notify partner if in chat
+  if (chatPairs[socket.id]) {
+    const partnerId = chatPairs[socket.id].partner;
+    io.to(partnerId).emit("partnerLeft", { partnerId: socket.id });
+    cleanupChatPair(socket.id);
+  }
+  
+  io.emit("onlineUsers", onlineUsers);
+});
+```
+
+**Next Button:**
+```javascript
+// server.js:185-222
+socket.on("next", () => {
+  // Disconnect current pair
+  // Add both users back to waiting queue
+  // Re-run matching algorithm
+});
+```
+
+## Database Schema
+
+### User Collection
+
+```javascript
+// models/User.js
+const userSchema = new mongoose.Schema({
+  // Required for all users
+  email: {
+    type: String,
+    required: true,
+    unique: true,
+    lowercase: true,
+    trim: true
+  },
+  
+  // Required only for email/password users
+  password: {
+    type: String,
+    required: function() {
+      return !this.isGoogleUser; // Not required for Google users
+    },
+    minlength: 6
+  },
+  
+  name: {
+    type: String,
+    trim: true
+  },
+  
+  // Google OAuth fields
+  googleId: {
+    type: String,
+    unique: true,
+    sparse: true  // Allows null while maintaining uniqueness
+  },
+  
+  isGoogleUser: {
+    type: Boolean,
+    default: false
+  },
+  
+  profilePicture: {
+    type: String
+  },
+  
+  // App-specific
+  withVideo: {
+    type: Boolean,
+    default: true
+  },
+  
+  isVerified: {
+    type: Boolean,
+    default: false
+  },
+  
+  // For ID card signup
+  generatedUserId: {
+    type: String,
+    sparse: true
+  },
+  
+  createdAt: {
+    type: Date,
+    default: Date.now
+  },
+  
+  lastLogin: {
+    type: Date,
+    default: Date.now
+  }
+});
+```
+
+**Indexes:**
+- `email`: Unique index for fast user lookup
+- `googleId`: Unique sparse index for OAuth users
+- `generatedUserId`: Sparse index for ID card users
+
+**Methods:**
+- `comparePassword(candidatePassword)`: Verify password hash
+- `updateLastLogin()`: Update last login timestamp
+
+**Hooks:**
+- `pre('save')`: Hash password before saving (for non-Google users)
+
+## Security Architecture
+
+### Authentication Security
+
+1. **JWT Token Security:**
+   - Tokens signed with `JWT_SECRET`
+   - 7-day expiration
+   - Includes `userId`, `email`, `isGoogleUser`
+   - Verified on protected routes
+
+2. **Password Security:**
+   - Hashed with bcrypt (salt rounds: 10)
+   - Never stored or transmitted in plain text
+   - Minimum length: 6 characters
+
+3. **Google OAuth Security:**
+   - Tokens verified with Google's servers
+   - Client ID validation
+   - Email verification required
+
+### Network Security
+
+1. **CORS Configuration:**
+   - Whitelist specific origins
+   - Credentials allowed only for trusted origins
+   - Blocks unauthorized domains
+
+2. **Socket.IO Security:**
+   - Optional authentication middleware available
+   - Token verification for socket connections
+   - Room-based isolation (users only receive messages from their room)
+
+3. **WebRTC Security:**
+   - Peer-to-peer encryption (DTLS-SRTP)
+   - Signaling through authenticated Socket.IO connection
+   - No media passes through server
+
+### Input Validation
+
+1. **Email Validation:**
+   - Domain restriction (`@adgitmdelhi.ac.in`)
+   - Format validation with regex
+   - Normalization (lowercase, trim)
+
+2. **File Upload Security:**
+   - Multer middleware for controlled uploads
+   - Files stored in temporary directory
+   - Immediate deletion after processing
+   - No permanent storage of user images
+
+## Data Flow Examples
+
+### Example 1: Complete User Journey (Google OAuth + Video Chat)
+
+1. **User opens app** → `App.jsx` loads
+2. **No JWT in localStorage** → Redirects to `Login.jsx`
+3. **User clicks Google Sign-In** → `googleAuth.js` initializes OAuth
+4. **Google returns credential** → Frontend POSTs to `/api/auth/google-login`
+5. **Backend verifies with Google** → Creates/updates user in MongoDB
+6. **Backend returns JWT** → Frontend stores in localStorage
+7. **Frontend connects Socket.IO** → `Socket.jsx` establishes connection
+8. **User clicks "Start Video Chat"** → Emits `findChat` with `withVideo=true`
+9. **Backend adds to waiting queue** → Waits for another video user
+10. **Another user requests video** → Backend matches both users
+11. **Backend emits "chatStart"** → Both clients receive match notification
+12. **Clients emit "ready-to-connect"** → Backend determines offer/answer roles
+13. **User A creates WebRTC offer** → Sends to backend via `webrtc-offer`
+14. **Backend relays to User B** → User B receives offer
+15. **User B creates answer** → Sends via `webrtc-answer`
+16. **ICE candidates exchanged** → Direct P2P connection established
+17. **Video streams** → Direct between peers, not through server
+18. **User sends message** → Goes through Socket.IO for text
+19. **User clicks "Next"** → Backend disconnects pair, re-queues both
+
+### Example 2: Authentication Middleware Flow
+
+**Protected Route Request:**
+
+```
+Client                    Middleware              Database             Handler
+  │                          │                       │                    │
+  ├─ GET /api/profile ──────►│                       │                    │
+  │  Authorization: Bearer..  │                       │                    │
+  │                          │                       │                    │
+  │                          ├─ Extract token        │                    │
+  │                          ├─ Verify JWT           │                    │
+  │                          │  (using JWT_SECRET)   │                    │
+  │                          │                       │                    │
+  │                          ├─ Query user ─────────►│                    │
+  │                          │                       ├─ Find by ID        │
+  │                          │◄──── User doc ────────┤                    │
+  │                          │                       │                    │
+  │                          ├─ Attach req.user      │                    │
+  │                          ├─ Call next() ─────────┼───────────────────►│
+  │                          │                       │                    │
+  │◄─────────────────────────┼───────────────────────┼────── Response ────┤
+  │  { user: { id, email,... }}                      │                    │
+```
+
+## Performance Considerations
+
+### Backend Optimization
+
+1. **Connection Pooling:**
+   - MongoDB uses connection pooling by default
+   - Socket.IO maintains persistent connections
+
+2. **Efficient Matching:**
+   - O(n) matching algorithm
+   - Preference-based pairing reduces wait time
+   - Immediate matching when pairs available
+
+3. **Memory Management:**
+   - In-memory queues for active users only
+   - Cleanup on disconnect
+   - No session storage (stateless JWT)
+
+### Frontend Optimization
+
+1. **Vite Build:**
+   - Fast HMR during development
+   - Optimized production builds
+   - Code splitting
+   - Tree shaking
+
+2. **React Optimization:**
+   - Component-based architecture
+   - Conditional rendering
+   - Event handler optimization
+
+3. **WebRTC:**
+   - Direct P2P reduces server load
+   - Adaptive bitrate
+   - ICE candidate optimization
+
+## Scalability Considerations
+
+### Current Limitations
+
+1. **Single Server:**
+   - All connections to one Node.js instance
+   - In-memory matching state
+   - Limited by single server capacity
+
+2. **No Load Balancing:**
+   - Sticky sessions required if scaled
+   - Socket.IO state not shared across instances
+
+### Scaling Strategies
+
+1. **Horizontal Scaling:**
+   - Use Redis adapter for Socket.IO
+   - Share matching queue via Redis
+   - Enable load balancing with session affinity
+
+2. **Database Scaling:**
+   - MongoDB replica sets for read scaling
+   - Sharding for large user bases
+   - Caching layer (Redis) for frequent queries
+
+3. **CDN:**
+   - Serve static frontend assets via CDN
+   - Reduce server load
+   - Improve global latency
+
+4. **Microservices (Future):**
+   - Separate authentication service
+   - Dedicated matching service
+   - WebRTC TURN/STUN servers for NAT traversal
+
+## Monitoring & Debugging
+
+### Backend Logging
+
+```javascript
+// Key log points in server.js:
+console.log("New user connected:", socket.id, "Total online users:", onlineUsers);
+console.log(`Authenticated user connected: ${socket.userEmail}`);
+console.log(`User ${userEmail} looking for chat, video: ${withVideo}`);
+console.log(`Matched ${user1Email} and ${user2Email} in room ${roomId}, video: ${withVideo}`);
+console.log(`User ${socket.id} disconnected. Total online users: ${onlineUsers}`);
+```
+
+### Frontend Debugging
+
+- **React DevTools:** Component hierarchy and state
+- **Browser Console:** Socket.IO events and WebRTC logs
+- **Network Tab:** API calls, WebSocket frames, STUN/TURN
+
+### Metrics to Monitor
+
+- Total online users
+- Users in waiting queue
+- Active chat pairs
+- Average wait time
+- Connection success rate
+- WebRTC connection failures
+- Authentication failures
+- Database query performance
+
+## Next Steps
+
+- Complete [Local Development Setup](/development/setup)
+- Configure [Environment Variables](/development/environment)
+- Explore [Authentication API](/api/auth/google-login) and [Socket Events](/api/socket/connection)
+- Review [Features Documentation](/features/video-chat)

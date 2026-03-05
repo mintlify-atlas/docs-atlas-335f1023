@@ -1,0 +1,441 @@
+---
+title: Environment Variables
+description: Complete reference for all environment variables used in MeetMates
+---
+
+## Overview
+
+MeetMates uses environment variables to configure both the frontend and backend applications. This page documents all available environment variables, their purposes, and how to obtain the necessary credentials.
+
+## Backend Environment Variables
+
+Create a `.env` file in the `backend/` directory with the following variables:
+
+### MONGODB_URI
+
+**Required:** Yes  
+**Type:** String  
+**Example:** `mongodb://localhost:27017/meetmates`
+
+MongoDB connection string for the database.
+
+**How to configure:**
+
+#### For Local MongoDB:
+```env
+MONGODB_URI=mongodb://localhost:27017/meetmates
+```
+
+#### For MongoDB Atlas:
+1. Create an account at [MongoDB Atlas](https://www.mongodb.com/cloud/atlas)
+2. Create a new cluster (free tier available)
+3. Click "Connect" → "Connect your application"
+4. Copy the connection string and replace `<password>` and `<dbname>`:
+
+```env
+MONGODB_URI=mongodb+srv://username:password@cluster0.xxxxx.mongodb.net/meetmates?retryWrites=true&w=majority
+```
+
+**Important notes:**
+- For Atlas, whitelist your IP address in Network Access
+- Use a strong password without special characters that need URL encoding
+- The database name (`meetmates`) can be customized
+
+**Used in:**
+- `backend/server.js:40` - Mongoose connection
+
+---
+
+### JWT_SECRET
+
+**Required:** Yes  
+**Type:** String  
+**Example:** `your-super-secret-jwt-key-change-this-in-production`
+
+Secret key used to sign and verify JWT authentication tokens.
+
+**How to configure:**
+
+Generate a strong random secret:
+
+```bash
+# Using Node.js
+node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"
+
+# Using OpenSSL
+openssl rand -hex 64
+
+# Manual (not recommended)
+JWT_SECRET=my-very-long-and-random-secret-key-123456789
+```
+
+**Important notes:**
+- Use a different secret for development and production
+- Keep this value secret and never commit it to version control
+- Minimum recommended length: 32 characters
+- Changing this value will invalidate all existing JWT tokens
+
+**Used in:**
+- `backend/routes/auth.js:77-83` - Token signing during login/signup
+- `backend/routes/auth.js:156` - Token signing for Google OAuth
+- `backend/middleware/auth.js:21` - Token verification
+- `backend/server.js:90` - Socket.IO authentication
+
+---
+
+### CORS_ORIGIN
+
+**Required:** Yes  
+**Type:** String (comma-separated URLs)  
+**Default:** `http://localhost:5173,https://www.meetmates.space`  
+**Example:** `http://localhost:5173,http://localhost:3000,https://yourdomain.com`
+
+Allowed origins for Cross-Origin Resource Sharing (CORS).
+
+**How to configure:**
+
+```env
+# Development only
+CORS_ORIGIN=http://localhost:5173
+
+# Development + Production
+CORS_ORIGIN=http://localhost:5173,https://www.meetmates.space
+
+# Multiple environments
+CORS_ORIGIN=http://localhost:5173,http://localhost:3000,https://staging.yourdomain.com,https://yourdomain.com
+```
+
+**Important notes:**
+- Include the protocol (`http://` or `https://`)
+- Do not include trailing slashes
+- For local development, ensure the port matches your frontend dev server
+- Vite's default port is `5173`
+
+**Used in:**
+- `backend/server.js:20-34` - CORS middleware configuration
+- `backend/server.js:111-116` - Socket.IO CORS configuration
+
+---
+
+### PORT
+
+**Required:** No  
+**Type:** Number  
+**Default:** `3001`  
+**Example:** `3001`
+
+Port number on which the backend server will run.
+
+**How to configure:**
+
+```env
+PORT=3001
+```
+
+**Important notes:**
+- If not specified, defaults to `3001`
+- Ensure the port is not already in use
+- Update frontend `VITE_BACKEND_URL` if you change this
+- Common ports: `3000`, `3001`, `5000`, `8080`
+
+**Used in:**
+- `backend/server.js:388-391` - Server initialization
+
+---
+
+### GOOGLE_CLIENT_ID
+
+**Required:** Yes (for Google OAuth)  
+**Type:** String  
+**Example:** `123456789-abcdefghijklmnop.apps.googleusercontent.com`
+
+Google OAuth 2.0 Client ID for authentication.
+
+**How to configure:**
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project or select existing one
+3. Enable **Google+ API**:
+   - Navigate to "APIs & Services" → "Library"
+   - Search for "Google+ API" and enable it
+4. Create OAuth 2.0 credentials:
+   - Go to "Credentials" → "Create Credentials" → "OAuth 2.0 Client ID"
+   - Application type: "Web application"
+   - Name: "MeetMates" (or your choice)
+5. Configure authorized origins:
+   - **Authorized JavaScript origins:**
+     - `http://localhost:5173` (development)
+     - `https://yourdomain.com` (production)
+   - **Authorized redirect URIs:**
+     - `http://localhost:5173` (development)
+     - `https://yourdomain.com` (production)
+6. Copy the **Client ID**
+
+```env
+GOOGLE_CLIENT_ID=123456789-abcdefghijklmnop.apps.googleusercontent.com
+```
+
+**Important notes:**
+- This value is used on both frontend and backend
+- Keep the Client Secret secure (not needed for frontend OAuth)
+- Configure the OAuth consent screen with your app details
+- For college-specific authentication, restrict domain in OAuth settings
+
+**Used in:**
+- `backend/routes/auth.js:10` - OAuth2Client initialization
+- `backend/routes/auth.js:107` - Token verification
+
+---
+
+### NODE_ENV
+
+**Required:** No  
+**Type:** String  
+**Values:** `development`, `production`, `test`  
+**Default:** `undefined`  
+**Example:** `development`
+
+Specifies the environment in which the application is running.
+
+**How to configure:**
+
+```env
+# Development
+NODE_ENV=development
+
+# Production
+NODE_ENV=production
+```
+
+**Important notes:**
+- Affects error message verbosity
+- Some packages behave differently based on this value
+- Production mode typically disables verbose logging
+
+**Used in:**
+- `backend/routes/auth.js:191` - Conditional error details
+
+---
+
+## Frontend Environment Variables
+
+Create a `.env` file in the `frontend/` directory with the following variables:
+
+<Note>
+  Vite requires environment variables to be prefixed with `VITE_` to be exposed to the client-side code.
+</Note>
+
+### VITE_BACKEND_URL
+
+**Required:** Yes  
+**Type:** String  
+**Example:** `http://localhost:3001`
+
+The base URL of the backend API server.
+
+**How to configure:**
+
+```env
+# Development
+VITE_BACKEND_URL=http://localhost:3001
+
+# Production
+VITE_BACKEND_URL=https://api.meetmates.space
+```
+
+**Important notes:**
+- Must match the backend server URL and port
+- Include the protocol (`http://` or `https://`)
+- Do not include trailing slashes
+- Do not include `/api` - it's added in the code
+- Used for both REST API calls and Socket.IO connections
+
+**Used in:**
+- `frontend/src/Socket.jsx:3` - Socket.IO connection
+- `frontend/src/components/Login.jsx:39` - Google login API
+- `frontend/src/components/Login.jsx:78-79` - Login/signup endpoints
+- `frontend/src/components/Login.jsx:156` - Image-based login
+- `frontend/src/components/Login.jsx:199` - Signup endpoint
+- `frontend/src/App.jsx:28` - Token verification
+
+---
+
+### VITE_GOOGLE_CLIENT_ID
+
+**Required:** Yes (for Google OAuth)  
+**Type:** String  
+**Example:** `123456789-abcdefghijklmnop.apps.googleusercontent.com`
+
+Google OAuth 2.0 Client ID for frontend authentication.
+
+**How to configure:**
+
+Use the same Client ID obtained from Google Cloud Console (see backend `GOOGLE_CLIENT_ID` above):
+
+```env
+VITE_GOOGLE_CLIENT_ID=123456789-abcdefghijklmnop.apps.googleusercontent.com
+```
+
+**Important notes:**
+- Must exactly match the `GOOGLE_CLIENT_ID` in backend `.env`
+- Used by Google Sign-In JavaScript library
+- Exposed to client-side code (not a security risk)
+- Required for Google One Tap and Sign-In Button
+
+**Used in:**
+- `frontend/src/components/Login.jsx:8` - Client ID constant
+- `frontend/src/googleAuth.js:2-6` - Google Sign-In initialization
+
+---
+
+## Environment Variable Templates
+
+### Backend `.env` Template
+
+Create `backend/.env`:
+
+```env
+# MongoDB Configuration
+MONGODB_URI=mongodb://localhost:27017/meetmates
+
+# JWT Configuration
+JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
+
+# CORS Configuration
+CORS_ORIGIN=http://localhost:5173,https://www.meetmates.space
+
+# Server Configuration
+PORT=3001
+
+# Google OAuth Configuration
+GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
+
+# Environment
+NODE_ENV=development
+```
+
+### Frontend `.env` Template
+
+Create `frontend/.env`:
+
+```env
+# Backend API URL
+VITE_BACKEND_URL=http://localhost:3001
+
+# Google OAuth Configuration
+VITE_GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
+```
+
+---
+
+## Production Considerations
+
+### Security Best Practices
+
+1. **Never commit `.env` files to version control**
+   - Add `.env` to `.gitignore`
+   - Both frontend and backend `.gitignore` already exclude `.env`
+
+2. **Use different credentials for production**
+   - Different `JWT_SECRET`
+   - Different MongoDB database
+   - Production Google OAuth credentials
+
+3. **Use environment variable management**
+   - For deployment: Vercel, Netlify, Railway, etc. have built-in env var management
+   - For VPS: Use services like Vault, AWS Secrets Manager, or .env files with proper permissions
+
+4. **Restrict CORS origins in production**
+   ```env
+   # Only allow your production domain
+   CORS_ORIGIN=https://www.meetmates.space
+   ```
+
+### Environment-Specific Configurations
+
+#### Development
+```env
+MONGODB_URI=mongodb://localhost:27017/meetmates_dev
+JWT_SECRET=dev-secret-key
+CORS_ORIGIN=http://localhost:5173
+PORT=3001
+NODE_ENV=development
+VITE_BACKEND_URL=http://localhost:3001
+```
+
+#### Staging
+```env
+MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/meetmates_staging
+JWT_SECRET=staging-secret-key-different-from-prod
+CORS_ORIGIN=https://staging.meetmates.space
+PORT=3001
+NODE_ENV=production
+VITE_BACKEND_URL=https://api-staging.meetmates.space
+```
+
+#### Production
+```env
+MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/meetmates_production
+JWT_SECRET=production-secret-key-very-secure
+CORS_ORIGIN=https://www.meetmates.space
+PORT=3001
+NODE_ENV=production
+VITE_BACKEND_URL=https://api.meetmates.space
+```
+
+---
+
+## Troubleshooting
+
+### Environment Variables Not Loading
+
+**Problem:** Backend or frontend can't read environment variables
+
+**Solutions:**
+1. Ensure `.env` file is in the correct directory:
+   - Backend: `backend/.env`
+   - Frontend: `frontend/.env`
+2. Restart the development server after changing `.env`
+3. For Vite, ensure variables are prefixed with `VITE_`
+4. Check for syntax errors (no spaces around `=`)
+
+### CORS Errors Despite Configuration
+
+**Problem:** Still getting CORS errors
+
+**Solutions:**
+1. Verify `CORS_ORIGIN` includes the exact frontend URL with protocol
+2. Check for trailing slashes (shouldn't have any)
+3. Ensure backend server restarted after `.env` change
+4. Clear browser cache
+5. Check browser console for the exact origin being blocked
+
+### Google OAuth Not Working
+
+**Problem:** Google Sign-In button doesn't appear or OAuth fails
+
+**Solutions:**
+1. Verify `VITE_GOOGLE_CLIENT_ID` matches `GOOGLE_CLIENT_ID`
+2. Check authorized JavaScript origins in Google Console
+3. Ensure you're accessing the app from an authorized origin
+4. Look for errors in browser console
+5. Verify Google+ API is enabled in Google Cloud Console
+
+### MongoDB Connection Failed
+
+**Problem:** "MongoDB connection error"
+
+**Solutions:**
+1. Check `MONGODB_URI` format is correct
+2. For Atlas: Verify IP whitelist and credentials
+3. For local: Ensure MongoDB service is running
+4. Test connection string with MongoDB Compass
+5. Check for special characters in password (URL encode them)
+
+---
+
+## Next Steps
+
+- Complete the [Local Development Setup](/development/setup)
+- Understand the [System Architecture](/development/architecture)
+- Explore the [API Reference](/api/auth/google-login)

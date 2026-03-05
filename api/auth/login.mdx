@@ -1,0 +1,121 @@
+---
+title: "Login"
+api: "POST /api/auth/login"
+description: "Authenticate a user and receive a JWT token"
+---
+
+This endpoint authenticates a user with their email and password, returning a JWT token for subsequent authenticated requests.
+
+## Request Body
+
+<ParamField body="email" type="string" required>
+  User's email address or user ID used during signup
+</ParamField>
+
+<ParamField body="password" type="string" required>
+  User's password
+</ParamField>
+
+## Request Example
+
+```bash
+curl -X POST https://api.meetmates.com/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "student@adgitmdelhi.ac.in",
+    "password": "securepassword123"
+  }'
+```
+
+```json
+{
+  "email": "student@adgitmdelhi.ac.in",
+  "password": "securepassword123"
+}
+```
+
+## Response
+
+<ResponseField name="token" type="string">
+  JWT authentication token valid for 7 days. Include this in the Authorization header as `Bearer <token>` for protected endpoints
+</ResponseField>
+
+## Response Example
+
+```json 200 - Success
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjY1N2Y0ZDhlOTBjMjNhNDU2N2IzOGY5MSIsImlhdCI6MTcwMjg5NzYwMCwiZXhwIjoxNzAzNTAyNDAwfQ.xyz123..."
+}
+```
+
+## Error Responses
+
+<ResponseField name="msg" type="string">
+  Error message describing what went wrong
+</ResponseField>
+
+<ResponseField name="error" type="string">
+  System error message (for 500 errors)
+</ResponseField>
+
+### Error Codes
+
+<ResponseExample>
+```json 400 - Invalid Email Format
+{
+  "msg": "Login is only allowed with an @adgitmdelhi.ac.in email or a valid user ID."
+}
+```
+
+```json 400 - Invalid Credentials (User Not Found)
+{
+  "msg": "Invalid credentials."
+}
+```
+
+```json 400 - Invalid Credentials (Wrong Password)
+{
+  "msg": "Invalid credentials."
+}
+```
+
+```json 500 - Missing JWT Secret
+{
+  "error": "JWT_SECRET is not set in environment variables."
+}
+```
+
+```json 500 - Server Error
+{
+  "error": "Internal server error."
+}
+```
+</ResponseExample>
+
+## Authentication
+
+This endpoint does not require authentication. It is used to obtain the authentication token.
+
+## Token Details
+
+The JWT token contains:
+- `id`: User's MongoDB ObjectId
+- `iat`: Token issued at timestamp
+- `exp`: Token expiration timestamp (7 days from issue)
+
+### Using the Token
+
+Include the token in subsequent requests using the Authorization header:
+
+```bash
+curl -X GET https://api.meetmates.com/api/protected-endpoint \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+```
+
+## Security Notes
+
+- The email is normalized (trimmed and converted to lowercase) before lookup
+- Both incorrect email and incorrect password return the same "Invalid credentials" message to prevent user enumeration
+- Passwords are compared using bcrypt's secure comparison method
+- The token expires after 7 days and must be refreshed
+- Google OAuth users cannot login using this endpoint (they don't have passwords)

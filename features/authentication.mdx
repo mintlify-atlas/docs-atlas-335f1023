@@ -1,0 +1,696 @@
+---
+title: 'Authentication'
+description: 'Multi-provider authentication with Google OAuth, email/password, and JWT session management'
+---
+
+## Overview
+
+MeetMates supports multiple authentication methods:
+- **Google OAuth 2.0**: One-click sign-in with Google accounts
+- **Email/Password**: Traditional credentials with bcrypt hashing
+- **JWT Tokens**: Stateless session management with 7-day expiration
+
+All authentication flows are implemented in `routes/auth.js` with JWT middleware in `middleware/auth.js`.
+
+## User Model
+
+The User schema supports both authentication methods:
+
+```javascript models/User.js:6-62
+const userSchema = new mongoose.Schema({
+  email: {
+    type: String,
+    required: true,
+    unique: true,
+    lowercase: true,
+    trim: true
+  },
+  password: {
+    type: String,
+    required: function() {
+      // Password required only for non-Google users
+      return !this.isGoogleUser;
+    },
+    minlength: 6
+  },
+  name: {
+    type: String,
+    trim: true
+  },
+  // Google Auth fields
+  googleId: {
+    type: String,
+    unique: true,
+    sparse: true  // Allows null while maintaining uniqueness
+  },
+  isGoogleUser: {
+    type: Boolean,
+    default: false
+  },
+  profilePicture: {
+    type: String
+  },
+  // App-specific fields
+  withVideo: {
+    type: Boolean,
+    default: true
+  },
+  isVerified: {
+    type: Boolean,
+    default: false
+  },
+  generatedUserId: {
+    type: String,
+    sparse: true
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  },
+  lastLogin: {
+    type: Date,
+    default: Date.now
+  }
+});
+```
+
+<Info>
+The `sparse: true` option on `googleId` allows multiple users without Google IDs while maintaining uniqueness for those who have them.
+</Info>
+
+## Password Hashing
+
+Passwords are automatically hashed using bcrypt before saving:
+
+```javascript models/User.js:64-77
+userSchema.pre('save', async function(next) {
+  if (!this.isModified('password') || !this.password) {
+    return next();
+  }
+  
+  try {
+    const salt = await bcrypt.genSalt(10);
+    this.password = await bcrypt.hash(this.password, salt);
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+```
+
+```javascript models/User.js:79-85
+userSchema.methods.comparePassword = async function(candidatePassword) {
+  if (!this.password) {
+    return false;  // Google users don't have passwords
+  }
+  return await bcrypt.compare(candidatePassword, this.password);
+};
+```
+
+<Warning>
+Bcrypt with salt rounds of 10 provides strong security but adds ~100ms to login/signup. This is acceptable for auth operations.
+</Warning>
+
+## Email/Password Signup
+
+### API Endpoint
+
+```javascript routes/auth.js:21-53
+router.post("/signup", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    console.log("signup attempt:", { email });
+
+    const normalizedEmail = normalize(email);
+
+    // Validate email domain
+    if (!isValidEmailOrUserID(normalizedEmail)) {
+      return res.status(400).json({
+        msg: "Signup is only allowed with an @adgitmdelhi.ac.in email or a valid user ID.",
+      });
+    }
+
+    // Validate password length
+    if (password.length < 6) {
+      return res.status(400).json({ 
+        msg: "Password must be at least 6 characters long." 
+      });
+    }
+
+    // Check for existing user
+    const existingUser = await User.findOne({ email: normalizedEmail });
+    if (existingUser) {
+      return res.status(400).json({ msg: "User already exists." });
+    }
+
+    // Create user (password will be hashed by pre-save hook)
+    await User.create({ email: normalizedEmail, password: password });
+
+    return res.status(201).json({ msg: "Signup successful." });
+  } catch (err) {
+    console.error("Signup error:", err);
+    return res.status(500).json({ error: "Internal server error." });
+  }
+});
+```
+
+<Tip>
+The endpoint returns 201 (Created) for successful signups rather than 200 (OK), following REST best practices.
+</Tip>
+
+### Email Validation
+
+```javascript routes/auth.js:13-20
+function isValidEmailOrUserID(input) {
+  return (
+    input.endsWith("@adgitmdelhi.ac.in") || /^[a-z0-9]{5,}$/i.test(input)
+  );
+}
+
+function normalize(input) {
+  return input.trim().toLowerCase();
+}
+```
+
+<Note>
+The system accepts either institutional emails (`@adgitmdelhi.ac.in`) or alphanumeric user IDs (5+ characters).
+</Note>
+
+## Email/Password Login
+
+```javascript routes/auth.js:55-92
+router.post("/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    console.log("Login attempt:", { email });
+    const normalizedEmail = normalize(email);
+
+    // Validate email format
+    if (!isValidEmailOrUserID(normalizedEmail)) {
+      return res.status(400).json({
+        msg: "Login is only allowed with an @adgitmdelhi.ac.in email or a valid user ID.",
+      });
+    }
+
+    // Find user
+    const user = await User.findOne({ email: normalizedEmail });
+    if (!user) {
+      return res.status(400).json({ msg: "Invalid credentials." });
+    }
+
+    // Verify password
+    const match = await user.comparePassword(password);
+    if (!match) {
+      return res.status(400).json({ msg: "Invalid credentials." });
+    }
+
+    // Check JWT_SECRET
+    if (!process.env.JWT_SECRET) {
+      return res.status(500).json({ 
+        error: "JWT_SECRET is not set in environment variables." 
+      });
+    }
+
+    // Generate JWT
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
+      expiresIn: "7d",
+    });
+
+    return res.status(200).json({ token });
+  } catch (err) {
+    console.error("Login error:", err);
+    return res.status(500).json({ error: "Internal server error." });
+  }
+});
+```
+
+<Warning>
+Both invalid email and invalid password return the same "Invalid credentials" message to prevent user enumeration attacks.
+</Warning>
+
+## Google OAuth Flow
+
+### Server-Side Implementation
+
+```javascript routes/auth.js:94-194
+router.post('/google-login', async (req, res) => {
+  try {
+    const { credential, withVideo } = req.body;
+
+    if (!credential) {
+      return res.status(400).json({ 
+        error: 'Google credential is required' 
+      });
+    }
+
+    // Verify the Google token
+    const ticket = await client.verifyIdToken({
+      idToken: credential,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+
+    const payload = ticket.getPayload();
+    const { email, name, picture, sub: googleId } = payload;
+
+    if (!email) {
+      return res.status(400).json({ 
+        error: 'Email not provided by Google' 
+      });
+    }
+
+    // Check if user exists (by email OR googleId)
+    let user = await User.findOne({ 
+      $or: [
+        { email: email },
+        { googleId: googleId }
+      ]
+    });
+
+    if (user) {
+      // Update Google info if user signed up with email first
+      if (!user.googleId) {
+        user.googleId = googleId;
+        user.name = user.name || name;
+        user.profilePicture = user.profilePicture || picture;
+        await user.save();
+      }
+    } else {
+      // Create new user
+      user = new User({
+        email: email,
+        name: name,
+        googleId: googleId,
+        profilePicture: picture,
+        isGoogleUser: true,
+        isVerified: true,
+        withVideo: withVideo || true
+      });
+      await user.save();
+    }
+
+    // Generate JWT
+    const token = jwt.sign(
+      { 
+        userId: user._id, 
+        email: user.email,
+        isGoogleUser: user.isGoogleUser 
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.status(200).json({
+      success: true,
+      message: user.isGoogleUser && !user.password ? 'Google signup successful' : 'Google login successful',
+      token: token,
+      user: {
+        id: user._id,
+        email: user.email,
+        name: user.name,
+        profilePicture: user.profilePicture,
+        isGoogleUser: user.isGoogleUser,
+        withVideo: user.withVideo
+      }
+    });
+
+  } catch (error) {
+    console.error('Google auth error:', error);
+    
+    if (error.message.includes('Token used too early')) {
+      return res.status(400).json({ 
+        error: 'Invalid token timing. Please try again.' 
+      });
+    }
+    
+    if (error.message.includes('Invalid token')) {
+      return res.status(400).json({ 
+        error: 'Invalid Google token. Please try again.' 
+      });
+    }
+
+    res.status(500).json({ 
+      error: 'Google authentication failed',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+```
+
+<AccordionGroup>
+  <Accordion title="Why check both email and googleId?">
+    A user might sign up with email/password first, then later try Google OAuth with the same email. This allows account linking.
+  </Accordion>
+  
+  <Accordion title="Why set isVerified: true for Google users?">
+    Google already verified the email address. We trust Google's verification process.
+  </Accordion>
+  
+  <Accordion title="What's the 'Token used too early' error?">
+    This occurs when the client's clock is ahead of the server's. Google tokens have an `iat` (issued at) claim that must be in the past.
+  </Accordion>
+</AccordionGroup>
+
+### OAuth Client Configuration
+
+```javascript routes/auth.js:10
+const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+```
+
+**Required Environment Variables:**
+```bash .env
+GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
+JWT_SECRET=your-secret-key-min-32-chars
+```
+
+<Warning>
+The `GOOGLE_CLIENT_ID` must match the client ID configured in Google Cloud Console. Mismatches will cause token verification to fail.
+</Warning>
+
+## JWT Token Structure
+
+### Email/Password JWT
+
+```javascript routes/auth.js:83-85
+const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
+  expiresIn: "7d",
+});
+```
+
+### Google OAuth JWT
+
+```javascript routes/auth.js:150-158
+const token = jwt.sign(
+  { 
+    userId: user._id, 
+    email: user.email,
+    isGoogleUser: user.isGoogleUser 
+  },
+  process.env.JWT_SECRET,
+  { expiresIn: '7d' }
+);
+```
+
+<Note>
+Google OAuth tokens include more user information for easier identification in logs and debugging.
+</Note>
+
+## Authentication Middleware
+
+### Required Auth
+
+```javascript middleware/auth.js:6-55
+const authMiddleware = async (req, res, next) => {
+  try {
+    // Extract token from header
+    const authHeader = req.header('Authorization');
+    const token = authHeader && authHeader.startsWith('Bearer ') 
+      ? authHeader.substring(7) 
+      : req.header('x-auth-token');
+
+    if (!token) {
+      return res.status(401).json({ 
+        error: 'No token provided, authorization denied' 
+      });
+    }
+
+    // Verify token
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    
+    // Get user from database
+    const user = await User.findById(decoded.userId).select('-password');
+    
+    if (!user) {
+      return res.status(401).json({ 
+        error: 'Token is not valid - user not found' 
+      });
+    }
+
+    // Attach user to request
+    req.user = user;
+    next();
+    
+  } catch (error) {
+    console.error('Auth middleware error:', error);
+    
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ 
+        error: 'Token has expired' 
+      });
+    }
+    
+    if (error.name === 'JsonWebTokenError') {
+      return res.status(401).json({ 
+        error: 'Invalid token' 
+      });
+    }
+    
+    res.status(500).json({ 
+      error: 'Server error in authentication' 
+    });
+  }
+};
+```
+
+<Tip>
+The middleware supports both `Authorization: Bearer <token>` and `x-auth-token: <token>` header formats for flexibility.
+</Tip>
+
+### Optional Auth
+
+```javascript middleware/auth.js:58-76
+const optionalAuth = async (req, res, next) => {
+  try {
+    const authHeader = req.header('Authorization');
+    const token = authHeader && authHeader.startsWith('Bearer ') 
+      ? authHeader.substring(7) 
+      : req.header('x-auth-token');
+
+    if (token) {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const user = await User.findById(decoded.userId).select('-password');
+      req.user = user;
+    }
+    
+    next();
+  } catch (error) {
+    // Continue without authentication if token is invalid
+    next();
+  }
+};
+```
+
+<Info>
+Optional auth allows routes to work for both authenticated and anonymous users, with `req.user` populated only if a valid token is provided.
+</Info>
+
+## Protected Routes
+
+### Profile Endpoint
+
+```javascript server.js:52-63
+app.get("/api/profile", authMiddleware, (req, res) => {
+  res.json({
+    success: true,
+    user: {
+      id: req.user._id,
+      email: req.user.email,
+      name: req.user.name,
+      profilePicture: req.user.profilePicture,
+      isGoogleUser: req.user.isGoogleUser
+    }
+  });
+});
+```
+
+### Token Verification
+
+```javascript server.js:66-76
+app.get("/api/verify-token", authMiddleware, (req, res) => {
+  res.json({
+    success: true,
+    message: "Token is valid",
+    user: {
+      id: req.user._id,
+      email: req.user.email,
+      name: req.user.name
+    }
+  });
+});
+```
+
+## Socket.io Authentication
+
+### Socket Middleware
+
+```javascript server.js:79-104
+const socketAuthMiddleware = async (socket, next) => {
+  try {
+    const token = socket.handshake.auth.token || socket.handshake.headers.authorization;
+
+    if (!token) {
+      return next(new Error("Authentication token required"));
+    }
+
+    // Remove 'Bearer ' prefix if present
+    const cleanToken = token.startsWith('Bearer ') ? token.substring(7) : token;
+
+    const decoded = jwt.verify(cleanToken, process.env.JWT_SECRET);
+
+    // Attach user info to socket
+    socket.userId = decoded.userId;
+    socket.userEmail = decoded.email;
+    socket.isGoogleUser = decoded.isGoogleUser;
+
+    next();
+  } catch (error) {
+    console.error("Socket authentication error:", error);
+    next(new Error("Authentication failed"));
+  }
+};
+```
+
+<Note>
+Socket authentication is **currently disabled** (line 108) to allow anonymous chatting. Uncomment `io.use(socketAuthMiddleware)` to require auth for all socket connections.
+</Note>
+
+### Authenticated Socket Storage
+
+```javascript server.js:133-140
+if (socket.userId) {
+  authenticatedUsers.set(socket.id, {
+    userId: socket.userId,
+    email: socket.userEmail,
+    isGoogleUser: socket.isGoogleUser
+  });
+  console.log(`Authenticated user connected: ${socket.userEmail}`);
+}
+```
+
+## Client-Side Token Management
+
+### Auto-Login on App Load
+
+```javascript App.jsx:20-60
+const checkTokenAndAutoLogin = async () => {
+  const token = localStorage.getItem("token");
+  const email = localStorage.getItem("collegeEmail");
+  const withVideo = localStorage.getItem("withVideo") === "true";
+
+  if (token && email) {
+    try {
+      const apiUrl = import.meta.env.VITE_BACKEND_URL;
+      if (!apiUrl) {
+        console.error("API URL is not defined.");
+        localStorage.clear();
+        return;
+      }
+
+      const res = await fetch(`${apiUrl}/api/verify-token`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        console.log("Token is valid, auto-login...");
+        socket.auth = { token };
+        if (!socket.connected) {
+          socket.connect();
+        }
+        setCurrentScreen("start");
+      } else {
+        localStorage.clear();
+      }
+    } catch (err) {
+      console.error("Token check failed:", err);
+    }
+  }
+};
+```
+
+<Tip>
+Auto-login provides a seamless experience. Users stay logged in across browser sessions until the 7-day token expires.
+</Tip>
+
+### Token Storage
+
+```javascript
+localStorage.setItem("token", token);
+localStorage.setItem("collegeEmail", email);
+localStorage.setItem("withVideo", withVideo);
+```
+
+<Warning>
+`localStorage` is vulnerable to XSS attacks. For production, consider using httpOnly cookies for token storage.
+</Warning>
+
+### Logout
+
+```javascript App.jsx:185-189
+const logout = () => {
+  localStorage.clear();
+  socket.disconnect();
+  setCurrentScreen("login");
+};
+```
+
+## Security Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Password Hashing" icon="lock">
+    Bcrypt with 10 salt rounds provides strong one-way encryption
+  </Card>
+  <Card title="Token Expiration" icon="clock">
+    7-day JWT expiration balances convenience and security
+  </Card>
+  <Card title="Error Messages" icon="shield-halved">
+    Generic "Invalid credentials" prevents user enumeration
+  </Card>
+  <Card title="HTTPS Only" icon="certificate">
+    Tokens should only be transmitted over HTTPS in production
+  </Card>
+</CardGroup>
+
+## Environment Configuration
+
+```bash .env
+# JWT Configuration
+JWT_SECRET=your-secret-key-at-least-32-characters-long
+
+# Google OAuth
+GOOGLE_CLIENT_ID=123456789-abc.apps.googleusercontent.com
+
+# Database
+MONGODB_URI=mongodb://localhost:27017/meetmates
+
+# Server
+PORT=3001
+NODE_ENV=production
+```
+
+<Warning>
+Never commit `.env` files to version control. Use `.env.example` as a template with placeholder values.
+</Warning>
+
+## Future Security Enhancements
+
+<Steps>
+  <Step title="Refresh Tokens">
+    Implement short-lived access tokens (15min) with long-lived refresh tokens (30 days)
+  </Step>
+  <Step title="Rate Limiting">
+    Add express-rate-limit to prevent brute force attacks on login
+  </Step>
+  <Step title="2FA Support">
+    Optional TOTP-based two-factor authentication for sensitive accounts
+  </Step>
+  <Step title="Session Management">
+    Track active sessions and allow users to revoke tokens
+  </Step>
+  <Step title="Password Reset">
+    Email-based password reset flow with time-limited tokens
+  </Step>
+</Steps>

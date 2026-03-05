@@ -1,0 +1,451 @@
+---
+title: 'Video Chat'
+description: 'WebRTC-based peer-to-peer video chat implementation with real-time signaling'
+---
+
+## Overview
+
+MeetMates implements real-time video chat using WebRTC (Web Real-Time Communication) for peer-to-peer connections. The system uses Socket.io for signaling and supports dynamic video/audio toggling, connection recovery, and graceful fallback to text-only chat.
+
+## Architecture
+
+<Accordion title="WebRTC Flow Diagram">
+```
+Client A                    Server (Socket.io)                Client B
+   |                               |                              |
+   |--- ready-to-connect --------->|                              |
+   |                               |<------- ready-to-connect ----|
+   |                               |                              |
+   |<--- create-offer -------------|                              |
+   |                               |                              |
+   |--- webrtc-offer ------------->|                              |
+   |                               |------- webrtc-offer -------->|
+   |                               |                              |
+   |                               |<------ webrtc-answer --------|
+   |<--- webrtc-answer ------------|                              |
+   |                               |                              |
+   |--- ice-candidate ------------>|                              |
+   |                               |------ ice-candidate -------->|
+   |                               |                              |
+   |<==========  Direct P2P Connection Established  =============>|
+```
+</Accordion>
+
+## WebRTC Signaling (Server)
+
+The server acts as a signaling intermediary to establish peer connections. Located in `server.js:224-267`:
+
+### Socket Events
+
+<CodeGroup>
+```javascript server.js (Ready Signal)
+// Track users ready for WebRTC
+let rtcReadyUsers = new Set();
+
+socket.on("ready-to-connect", () => {
+  rtcReadyUsers.add(socket.id);
+
+  if (chatPairs[socket.id]) {
+    const partnerId = chatPairs[socket.id].partner;
+
+    // Both users ready - initiate offer from lower socket ID
+    if (rtcReadyUsers.has(partnerId)) {
+      if (socket.id < partnerId) {
+        socket.emit("create-offer");
+      }
+    }
+  }
+});
+```
+
+```javascript server.js (Offer/Answer Exchange)
+socket.on("webrtc-offer", (data) => {
+  if (chatPairs[socket.id]) {
+    const partnerId = chatPairs[socket.id].partner;
+    io.to(partnerId).emit("webrtc-offer", {
+      offer: data.offer,
+      from: socket.id,
+    });
+  }
+});
+
+socket.on("webrtc-answer", (data) => {
+  if (chatPairs[socket.id]) {
+    const partnerId = chatPairs[socket.id].partner;
+    io.to(partnerId).emit("webrtc-answer", {
+      answer: data.answer,
+      from: socket.id,
+    });
+  }
+});
+```
+
+```javascript server.js (ICE Candidates)
+socket.on("ice-candidate", (data) => {
+  if (chatPairs[socket.id]) {
+    const partnerId = chatPairs[socket.id].partner;
+    io.to(partnerId).emit("ice-candidate", {
+      candidate: data.candidate,
+      from: socket.id,
+    });
+  }
+});
+```
+</CodeGroup>
+
+<Note>
+The server uses deterministic offer creation (lower socket.id creates the offer) to prevent offer/answer collisions.
+</Note>
+
+## Client Implementation
+
+The WebRTC client is implemented in `VideoChat.jsx` with comprehensive connection management.
+
+### ICE Configuration
+
+```javascript VideoChat.jsx:27-33
+const iceServers = {
+  iceServers: [
+    { urls: "stun:stun.l.google.com:19302" },
+    { urls: "stun:stun1.l.google.com:19302" },
+    { urls: "stun:stun2.l.google.com:19302" },
+  ],
+};
+```
+
+<Info>
+STUN (Session Traversal Utilities for NAT) servers help establish connections through NAT/firewalls by discovering public IP addresses.
+</Info>
+
+### Peer Connection Setup
+
+<CodeGroup>
+```javascript VideoChat.jsx (Create Connection)
+const createPeerConnection = () => {
+  // Close existing connection
+  if (peerConnectionRef.current) {
+    peerConnectionRef.current.close();
+  }
+
+  const pc = new RTCPeerConnection(iceServers);
+  peerConnectionRef.current = pc;
+
+  // Add local media tracks
+  if (localStreamRef.current) {
+    localStreamRef.current.getTracks().forEach((track) => {
+      pc.addTrack(track, localStreamRef.current);
+    });
+  }
+
+  // Handle remote tracks
+  pc.ontrack = (event) => {
+    console.log("Remote track received", event.streams[0]);
+    if (remoteVideoRef.current && event.streams[0]) {
+      remoteVideoRef.current.srcObject = event.streams[0];
+      setIsConnected(true);
+    }
+  };
+
+  // ... connection state handlers
+};
+```
+
+```javascript VideoChat.jsx (Media Capture)
+const setupMediaDevices = async () => {
+  // Request camera and microphone access
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: true,
+    audio: true,
+  });
+
+  localStreamRef.current = stream;
+
+  // Display local video
+  if (localVideoRef.current) {
+    localVideoRef.current.srcObject = stream;
+  }
+
+  createPeerConnection();
+};
+```
+</CodeGroup>
+
+### Connection State Management
+
+```javascript VideoChat.jsx:66-92
+pc.onconnectionstatechange = () => {
+  const state = pc.connectionState;
+  console.log("Connection state:", state);
+  setConnectionState(state);
+
+  if (state === "connected") {
+    setIsConnected(true);
+  } else if (state === "failed" || state === "disconnected" || state === "closed") {
+    setIsConnected(false);
+
+    // Retry connection (max 3 attempts)
+    if (state === "failed" && connectionAttempts < 3) {
+      console.log(`Retrying... (Attempt ${connectionAttempts + 1})`);
+      setTimeout(() => {
+        setConnectionAttempts((prev) => prev + 1);
+        createPeerConnection();
+        socket.emit("ready-to-connect");
+      }, 1000);
+    }
+  }
+};
+```
+
+<Accordion title="WebRTC Connection States">
+- **new**: Connection object created, no networking yet
+- **connecting**: ICE agent is gathering candidates or establishing connection
+- **connected**: Connection successfully established
+- **disconnected**: At least one transport has failed (may recover)
+- **failed**: One or more transports have failed permanently
+- **closed**: Connection has been closed
+</Accordion>
+
+### Offer/Answer Exchange
+
+<CodeGroup>
+```javascript VideoChat.jsx (Handle Offer)
+const handleOffer = async (data) => {
+  const pc = peerConnectionRef.current;
+  if (!pc) return;
+
+  // Prevent duplicate processing
+  const offerId = JSON.stringify(data.offer);
+  if (processedSignalsRef.current.has(offerId)) {
+    console.log("Duplicate offer - ignoring");
+    return;
+  }
+  processedSignalsRef.current.add(offerId);
+
+  // Handle signaling state conflicts
+  if (pc.signalingState === "have-local-offer") {
+    console.log("Rolling back local offer");
+    await pc.setLocalDescription({ type: "rollback" });
+  }
+
+  // Set remote offer
+  await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+
+  // Create and send answer
+  const answer = await pc.createAnswer();
+  await pc.setLocalDescription(answer);
+  socket.emit("webrtc-answer", { answer });
+};
+```
+
+```javascript VideoChat.jsx (Handle Answer)
+const handleAnswer = async (data) => {
+  const pc = peerConnectionRef.current;
+  if (!pc) return;
+
+  const answerId = JSON.stringify(data.answer);
+  if (processedSignalsRef.current.has(answerId)) {
+    return;
+  }
+  processedSignalsRef.current.add(answerId);
+
+  // Only accept answer in correct signaling state
+  if (pc.signalingState !== "have-local-offer") {
+    console.log("Cannot set answer in state:", pc.signalingState);
+    return;
+  }
+
+  await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+};
+```
+
+```javascript VideoChat.jsx (Create Offer)
+const createOfferFn = async () => {
+  const pc = peerConnectionRef.current;
+  if (!pc) return;
+
+  if (pc.signalingState !== "stable") {
+    console.log("Cannot create offer in state:", pc.signalingState);
+    return;
+  }
+
+  const offer = await pc.createOffer();
+  await pc.setLocalDescription(offer);
+  socket.emit("webrtc-offer", { offer });
+};
+```
+</CodeGroup>
+
+### ICE Candidate Exchange
+
+```javascript VideoChat.jsx:94-100
+// Local ICE candidate generation
+pc.onicecandidate = (event) => {
+  if (event.candidate) {
+    socket.emit("ice-candidate", {
+      candidate: event.candidate,
+    });
+  }
+};
+
+// Remote ICE candidate handling
+const handleIceCandidate = async (data) => {
+  if (data.candidate && peerConnectionRef.current) {
+    await peerConnectionRef.current.addIceCandidate(
+      new RTCIceCandidate(data.candidate)
+    );
+  }
+};
+```
+
+<Warning>
+ICE candidates must be added after remote description is set. Queue candidates if received early.
+</Warning>
+
+## Media Controls
+
+The client provides real-time media track controls:
+
+<CodeGroup>
+```javascript VideoChat.jsx (Toggle Microphone)
+const toggleMute = () => {
+  if (localStreamRef.current) {
+    const audioTracks = localStreamRef.current.getAudioTracks();
+    audioTracks.forEach((track) => {
+      track.enabled = !track.enabled;
+    });
+    setIsMuted(!isMuted);
+  }
+};
+```
+
+```javascript VideoChat.jsx (Toggle Camera)
+const toggleCamera = () => {
+  if (localStreamRef.current) {
+    const videoTracks = localStreamRef.current.getVideoTracks();
+    videoTracks.forEach((track) => {
+      track.enabled = !track.enabled;
+    });
+    setIsCameraOff(!isCameraOff);
+  }
+};
+```
+</CodeGroup>
+
+<Tip>
+Disabling tracks with `track.enabled = false` preserves the stream but stops transmission, reducing bandwidth while maintaining the connection.
+</Tip>
+
+## Connection Recovery
+
+The implementation includes automatic reconnection logic:
+
+```javascript VideoChat.jsx:81-90
+if (state === "failed" && connectionAttempts < 3) {
+  console.log(`Connection failed. Retrying... (Attempt ${connectionAttempts + 1})`);
+  setTimeout(() => {
+    setConnectionAttempts((prev) => prev + 1);
+    createPeerConnection();
+    socket.emit("ready-to-connect");
+  }, 1000);
+}
+```
+
+Manual reconnection is also available:
+
+```javascript VideoChat.jsx:331-335
+const reconnect = () => {
+  setConnectionAttempts(0);
+  createPeerConnection();
+  socket.emit("ready-to-connect");
+};
+```
+
+## Cleanup and Resource Management
+
+```javascript VideoChat.jsx:290-307
+return () => {
+  isComponentMounted = false;
+
+  // Remove socket listeners
+  socket.off("webrtc-offer");
+  socket.off("webrtc-answer");
+  socket.off("ice-candidate");
+  socket.off("create-offer");
+  socket.off("partnerLeft");
+
+  // Stop all media tracks
+  if (localStreamRef.current) {
+    localStreamRef.current.getTracks().forEach((track) => track.stop());
+  }
+
+  // Close peer connection
+  if (peerConnectionRef.current) {
+    peerConnectionRef.current.close();
+  }
+};
+```
+
+<Note>
+Proper cleanup is critical to prevent memory leaks and camera/microphone permission issues.
+</Note>
+
+## Integration with Chat Flow
+
+Video chat integrates seamlessly with the matching system:
+
+```javascript App.jsx:74-87
+socket.on("chatStart", (data) => {
+  const { withVideo } = data || {};
+  setCurrentScreen("chat");
+  setIsVideoChat(withVideo);
+  console.log("✅ Chat started, Video:", withVideo);
+  
+  setMessages([{
+    type: "system",
+    text: "Connected to chat partner"
+  }]);
+  
+  // Signal readiness for WebRTC
+  socket.emit("ready-to-connect");
+});
+```
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Peer-to-Peer" icon="arrow-right-arrow-left">
+    Direct browser-to-browser connections reduce latency and server costs
+  </Card>
+  <Card title="Auto Recovery" icon="arrows-rotate">
+    Automatic reconnection with up to 3 retry attempts
+  </Card>
+  <Card title="Dynamic Controls" icon="sliders">
+    Real-time mute/unmute and camera toggle without reconnection
+  </Card>
+  <Card title="NAT Traversal" icon="network-wired">
+    STUN server integration for connections across networks
+  </Card>
+</CardGroup>
+
+## Technical Considerations
+
+<AccordionGroup>
+  <Accordion title="Why deterministic offer creation?">
+    Using `socket.id < partnerId` ensures only one peer creates the offer, preventing offer/answer collisions when both users signal readiness simultaneously.
+  </Accordion>
+  
+  <Accordion title="Why track processed signals?">
+    Socket.io can deliver duplicate messages. Tracking processed offers/answers prevents state machine errors in RTCPeerConnection.
+  </Accordion>
+  
+  <Accordion title="Why rollback on offer collision?">
+    If a peer receives an offer while in `have-local-offer` state, it must rollback to `stable` before processing the remote offer, following the WebRTC specification.
+  </Accordion>
+  
+  <Accordion title="What about TURN servers?">
+    Currently using only STUN. For production, add TURN servers for users behind restrictive firewalls:
+    ```javascript
+    { urls: "turn:turn.example.com", username: "user", credential: "pass" }
+    ```
+  </Accordion>
+</AccordionGroup>

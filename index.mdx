@@ -1,97 +1,283 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "MeetMates"
+mode: "custom"
 ---
 
-## Setting up
+<div className="relative overflow-hidden bg-gradient-to-br from-[#0091FF] via-[#049cfc] to-[#0288ff] dark:from-[#0091FF] dark:via-[#049cfc] dark:to-[#0288ff]">
+  <div className="absolute inset-0 bg-black/10 dark:bg-black/20"></div>
+  <div className="relative py-20 px-6 max-w-6xl mx-auto">
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
+      <div className="lg:col-span-7">
+        <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-white mb-6">
+          Connect with Your Campus Community
+        </h1>
+        <p className="text-lg sm:text-xl text-white/90 mb-8 max-w-2xl">
+          MeetMates is a college-exclusive platform that brings students together through random video calls. Verified, secure, and designed for meaningful connections.
+        </p>
+        <div className="flex flex-wrap gap-4">
+          <a 
+            href="/quickstart" 
+            className="inline-flex items-center px-6 py-3 rounded-full bg-[#ff5c99] hover:bg-[#ff4a89] text-white font-semibold transition-colors no-underline"
+          >
+            Get Started
+          </a>
+          <a 
+            href="/introduction" 
+            className="inline-flex items-center px-6 py-3 rounded-full border-2 border-white/30 bg-white/10 hover:bg-white/20 text-white font-semibold transition-colors no-underline"
+          >
+            Learn More
+          </a>
+        </div>
+      </div>
+      <div className="lg:col-span-5 hidden lg:block">
+        <div className="relative">
+          <div className="rounded-2xl bg-white/10 backdrop-blur-sm border border-white/20 p-8 shadow-2xl">
+            <div className="space-y-4">
+              <div className="h-12 bg-white/20 rounded-lg animate-pulse"></div>
+              <div className="h-32 bg-white/20 rounded-lg animate-pulse"></div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="h-20 bg-white/20 rounded-lg animate-pulse"></div>
+                <div className="h-20 bg-white/20 rounded-lg animate-pulse"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
-Get your documentation site up and running in minutes.
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 dark:text-white mb-3">
+    Quick Start
+  </h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">
+    Get MeetMates up and running in minutes
+  </p>
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
+  <Steps>
+    <Step title="Clone the Repository">
+      First, clone the MeetMates repository to your local machine:
 
-## Make it yours
+      ```bash Terminal
+      git clone https://github.com/divyanshraj0408/meetmates.git
+      cd meetmates
+      ```
+    </Step>
 
-Design a docs site that looks great and empowers your users.
+    <Step title="Install Dependencies">
+      Install dependencies for both frontend and backend:
 
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
-  </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
-  </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
-  </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
-  </Card>
-</Columns>
+      ```bash Terminal
+      cd frontend && npm install
+      cd ../backend && npm install
+      ```
+    </Step>
 
-## Create beautiful pages
+    <Step title="Configure Environment">
+      Set up your environment variables for both the frontend and backend:
 
-Everything you need to create world-class documentation.
+      ```bash frontend/.env
+      VITE_BACKEND_URL=http://localhost:3001
+      VITE_GOOGLE_CLIENT_ID=your_google_client_id
+      ```
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+      ```bash backend/.env
+      MONGODB_URI=your_mongodb_uri
+      JWT_SECRET=your_jwt_secret
+      CORS_ORIGIN=http://localhost:5173
+      PORT=3001
+      ```
 
-## Need inspiration?
+      <Note>
+        You'll need to obtain a Google OAuth Client ID from the [Google Cloud Console](https://console.cloud.google.com/).
+      </Note>
+    </Step>
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+    <Step title="Start the Application">
+      Launch both the frontend and backend servers:
+
+      ```bash Terminal
+      # In the backend directory
+      npm start
+
+      # In a new terminal, in the frontend directory
+      npm run dev
+      ```
+
+      Your application will be running at `http://localhost:5173`!
+    </Step>
+  </Steps>
+</div>
+
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 dark:text-white mb-3">
+    Explore by Topic
+  </h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">
+    Dive into specific features and capabilities
+  </p>
+
+  <CardGroup cols={3}>
+    <Card 
+      title="Video Chat" 
+      icon="video" 
+      href="/features/video-chat"
+    >
+      Learn about WebRTC-powered peer-to-peer video connections
+    </Card>
+    <Card 
+      title="Random Matching" 
+      icon="shuffle" 
+      href="/features/random-matching"
+    >
+      Discover how users are paired for conversations
+    </Card>
+    <Card 
+      title="Authentication" 
+      icon="lock" 
+      href="/features/authentication"
+    >
+      Explore Google OAuth and email-based authentication
+    </Card>
+    <Card 
+      title="Safety Features" 
+      icon="shield" 
+      href="/features/safety"
+    >
+      Understand reporting, blocking, and moderation tools
+    </Card>
+    <Card 
+      title="Development Setup" 
+      icon="code" 
+      href="/development/setup"
+    >
+      Set up your local development environment
+    </Card>
+    <Card 
+      title="Architecture" 
+      icon="diagram-project" 
+      href="/development/architecture"
+    >
+      Understand the system design and technology stack
+    </Card>
+  </CardGroup>
+</div>
+
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 dark:text-white mb-3">
+    Key Features
+  </h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">
+    What makes MeetMates special
+  </p>
+
+  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div className="rounded-xl border border-gray-200 dark:border-[#27272a] bg-gray-50 dark:bg-[#1a1d27] p-6">
+      <div className="flex items-start gap-4">
+        <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-[#049cfc]/10 dark:bg-[#049cfc]/20 flex items-center justify-center">
+          <span className="text-[#049cfc] text-xl">🎓</span>
+        </div>
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+            College Email Verification
+          </h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Ensures only verified college students can join, creating a safe and authentic community environment.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div className="rounded-xl border border-gray-200 dark:border-[#27272a] bg-gray-50 dark:bg-[#1a1d27] p-6">
+      <div className="flex items-start gap-4">
+        <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-[#049cfc]/10 dark:bg-[#049cfc]/20 flex items-center justify-center">
+          <span className="text-[#049cfc] text-xl">🎥</span>
+        </div>
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+            Real-Time Video Streaming
+          </h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Powered by WebRTC for smooth, low-latency peer-to-peer video communication without intermediary servers.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div className="rounded-xl border border-gray-200 dark:border-[#27272a] bg-gray-50 dark:bg-[#1a1d27] p-6">
+      <div className="flex items-start gap-4">
+        <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-[#049cfc]/10 dark:bg-[#049cfc]/20 flex items-center justify-center">
+          <span className="text-[#049cfc] text-xl">💬</span>
+        </div>
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+            Text Chat Support
+          </h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            Real-time text messaging during video calls for a richer communication experience.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div className="rounded-xl border border-gray-200 dark:border-[#27272a] bg-gray-50 dark:bg-[#1a1d27] p-6">
+      <div className="flex items-start gap-4">
+        <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-[#049cfc]/10 dark:bg-[#049cfc]/20 flex items-center justify-center">
+          <span className="text-[#049cfc] text-xl">🔒</span>
+        </div>
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+            Privacy & Security
+          </h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400">
+            JWT-based authentication, secure socket connections, and user reporting features ensure a safe platform.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 dark:text-white mb-3">
+    API Reference
+  </h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">
+    Explore the REST API and Socket.io events
+  </p>
+
+  <CardGroup cols={2}>
+    <Card 
+      title="Authentication API" 
+      icon="key" 
+      href="/api/auth/google-login"
+    >
+      Google OAuth, signup, login, and token verification endpoints
+    </Card>
+    <Card 
+      title="Socket Events" 
+      icon="bolt" 
+      href="/api/socket/connection"
+    >
+      Real-time events for matching, WebRTC signaling, and messaging
+    </Card>
+  </CardGroup>
+</div>
+
+<div className="mt-20 mb-16 max-w-5xl mx-auto px-6">
+  <div className="rounded-2xl border border-gray-200 dark:border-[#27272a] bg-gradient-to-br from-gray-50 to-gray-100 dark:from-[#1a1d27] dark:to-[#242838] p-8 sm:p-12 text-center">
+    <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white mb-4">
+      Ready to Get Started?
+    </h2>
+    <p className="text-base text-gray-600 dark:text-gray-400 mb-8 max-w-2xl mx-auto">
+      Set up MeetMates locally and start building connections in your campus community.
+    </p>
+    <a 
+      href="/quickstart" 
+      className="inline-flex items-center px-6 py-3 rounded-full bg-[#049cfc] hover:bg-[#0388e0] text-white font-semibold transition-colors no-underline"
+    >
+      Get Started Now
+    </a>
+  </div>
+</div>
