@@ -1,0 +1,89 @@
+{
+  "projectType": "saas",
+  "projectName": "MeetMates",
+  "projectDescription": "College-exclusive random video calling platform for verified students to connect and network instantly.",
+  "theme": "almond",
+  "primaryColor": "#049cfc",
+  "lightColor": "#04111b",
+  "darkColor": "#bdbdbd",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Features",
+            "pages": [
+              "features/video-chat",
+              "features/random-matching",
+              "features/authentication",
+              "features/safety"
+            ]
+          },
+          {
+            "group": "Development",
+            "pages": [
+              "development/setup",
+              "development/environment",
+              "development/architecture"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Authentication",
+            "pages": [
+              "api/auth/google-login",
+              "api/auth/signup",
+              "api/auth/login",
+              "api/auth/verify-token"
+            ]
+          },
+          {
+            "group": "Socket Events",
+            "pages": [
+              "api/socket/connection",
+              "api/socket/matching",
+              "api/socket/webrtc",
+              "api/socket/messaging"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "College email authentication via Google OAuth",
+    "Random video matching with WebRTC",
+    "Real-time text messaging during video calls",
+    "Video and audio-only chat modes",
+    "Secure peer-to-peer connections",
+    "Online user tracking",
+    "Partner reporting and blocking"
+  ],
+  "publicApiSurface": [
+    "POST /api/auth/google-login",
+    "POST /api/auth/signup",
+    "POST /api/auth/login",
+    "GET /api/verify-token",
+    "GET /api/profile",
+    "Socket: findChat",
+    "Socket: sendMessage",
+    "Socket: next",
+    "Socket: ready-to-connect",
+    "Socket: webrtc-offer",
+    "Socket: webrtc-answer",
+    "Socket: ice-candidate"
+  ]
+}
